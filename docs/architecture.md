@@ -28,7 +28,7 @@ There is deliberately **no mandatory search** endpoint or dynamic server; a sear
 
 ## Trust model
 
-Devices will trust only the **repository key** and verify: repository key → developer key (with its namespaces) → package signature → file hashes. Two keys, two checks: the developer signature stays on the archive end to end, and the repository key vouches for both the entry and the developer key.
+Devices will trust only the **repository key** and verify: repository key → developer key (with its namespaces and package kinds) → package signature → file hashes. Two keys, two checks: the developer signature stays on the archive end to end, and the repository key vouches for both the entry and the developer key.
 
 The formats and checks are specified in [package_manager's registry trust model](https://github.com/xila-project/package_manager/blob/main/docs/registry-trust.md):
 
@@ -40,6 +40,8 @@ The formats and checks are specified in [package_manager's registry trust model]
 - Devices: the on-device installer still trusts a single developer key; it must verify from the pinned root key.
 - Publishing every intermediate `root.json` version, needed once the root key rotates.
 - A developer-key **revocation** list (until then, removing a key and re-signing is noticed by devices with a fresh index).
+
+**Native executables.** Wasm applications run confined by the runtime, but native code on a microcontroller without a memory protection unit runs fully trusted. A developer key therefore lists the `kinds` it may publish, `wasm` and/or `native`; without the field it may publish Wasm only. Validation, signing rehearsal and the device check (`publisher_key`) all refuse an entry whose target kind the key is not authorized for. Granting `native` to a key is a reviewed change to its key file.
 
 A SHA-256 digest or a developer signature alone does not grant permission to execute: capabilities and installation policy remain separate decisions.
 

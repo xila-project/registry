@@ -4,8 +4,10 @@
 # existing binary.
 set -euo pipefail
 
-# package_manager revision providing `xila-package registry check | sign | verify-signed`.
-PACKAGE_MANAGER_REVISION=3d0ab51d7f3c852b69f6578ea241b4d9cc6ca672
+# package_manager revision providing `xila-package registry check | sign | verify-signed`
+# and developer key `kinds` (Wasm or native authorization).
+# TEMPORARY: commit of xila-project/package_manager#71; repin to its merged revision.
+PACKAGE_MANAGER_REVISION=58c2f29192c28b2e086b57e5aec484fad4fdf9a7
 
 if [[ -n "${XILA_PACKAGE:-}" ]]; then
   echo "$XILA_PACKAGE"
