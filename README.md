@@ -41,7 +41,9 @@ For example, `xila.pixel-painter` 0.2.1 is `packages/xila/pixel-painter/0.2.1.js
 
 Published versions are **immutable**: a pull request may add entries but never modify or delete one; release a new version instead.
 
-Before Xila 1.0, a breaking format migration may replace entries that no supported `xila-package` or device can verify any more. The move to registry entry format 2 did so: the format 1 entries (`minimum_xila_abi`, applications 0.1.0) were removed, since the current package format cannot read their archives, and the applications are republished in format 2 from 0.2.1. `tools/check_immutable.sh` allows removing a format 1 entry and nothing else; every format 2 entry is immutable.
+Before Xila 1.0, a breaking format migration may replace entries that no supported `xila-package` or device can verify any more. The move to registry entry format 2 did so: the format 1 entries (`minimum_xila_abi`, applications 0.1.0) were removed, since the current package format cannot read their archives, and the applications are republished in format 2 from 0.2.1. `tools/check_immutable.sh` allows removing a format 1 entry.
+
+The rename of the publisher `xila-project` to `xila` (#19) was a one-time exception: the 15 published entries changed their `publisher` and nothing else. The archive URL, SHA-256 and size stayed, so each entry still pinned the same archive, and the archive check proved that the key `xila` signed it. `tools/check_immutable.sh` accepted that change for that pull request only, and a follow-up pull request removed the exception. Every format 2 entry is immutable.
 
 ## Validation and publication
 
