@@ -4,9 +4,10 @@
 # existing binary.
 set -euo pipefail
 
-# package_manager revision providing `xila-package registry check | sign | verify-signed`
-# and developer key `kinds` (Wasm or native authorization).
-PACKAGE_MANAGER_REVISION=857f4f56dd7035d9e8c575f76275508350f54f92
+# package_manager revision providing `xila-package registry check | sign | verify-signed`,
+# registry entry format 2 (`xila_version`), developer key `kinds` (Wasm or
+# native authorization) and namespace files for reverse-DNS identifiers.
+PACKAGE_MANAGER_REVISION=75b7596768a3470d17f2104b2ca4255971d6e1ba
 
 if [[ -n "${XILA_PACKAGE:-}" ]]; then
   echo "$XILA_PACKAGE"

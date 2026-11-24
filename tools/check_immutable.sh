@@ -6,12 +6,28 @@
 #   additions on the base are not changes). A published version is immutable:
 #   its entry, and therefore its archive URL, SHA-256 and size, may not be
 #   edited, renamed or deleted. Release a new version instead.
+#
+#   One exception, for the move to registry entry format 2: an entry that was
+#   still in format 1 (`minimum_xila_abi`) may be deleted. No supported
+#   xila-package or device can verify those entries or their archives. Every
+#   format 2 entry is immutable.
 set -euo pipefail
 
 base="${1:?usage: check_immutable.sh <base-ref> [repository-directory]}"
 cd "${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
-changed="$(git diff --name-only --diff-filter=MDRT "$base"...HEAD -- 'packages/*.json')"
+changed=""
+while IFS= read -r entry; do
+  [[ -n "$entry" ]] || continue
+  if [[ ! -e "$entry" ]] \
+    && [[ "$(git show "$base:$entry" 2>/dev/null | jq -r '.format_version' 2>/dev/null)" == 1 ]]; then
+    printf '%s: removed format 1 entry (no longer verifiable)\n' "$entry"
+    continue
+  fi
+  changed+="$entry"$'\n'
+done < <(git diff --name-only --no-renames --diff-filter=MDT "$base"...HEAD -- 'packages/*.json')
+
+changed="${changed%$'\n'}"
 if [[ -z "$changed" ]]; then
   exit 0
 fi

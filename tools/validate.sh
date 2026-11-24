@@ -17,6 +17,8 @@ if [[ $# -ge 1 ]]; then
   bash tools/check_immutable.sh "$1"
 fi
 
+# A registry may have no entry yet (git keeps no empty directory).
+mkdir -p packages
 downloads="$(mktemp -d)"
 trap 'rm -rf "$downloads"' EXIT
 find packages -name '*.json' -type f -print0 | sort -z | while IFS= read -r -d '' entry; do
@@ -36,4 +38,7 @@ bash tools/rehearse_signing.sh "$root"
 rm -rf _site
 mkdir _site
 cp -R keys packages _site/
+if [[ -d namespaces ]]; then
+  cp -R namespaces _site/
+fi
 echo "Built _site with $(find _site/packages -name '*.json' | wc -l) registry entries"
