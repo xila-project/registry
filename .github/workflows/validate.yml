@@ -25,6 +25,8 @@ jobs:
         with:
           path: .tools
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Test | Validation rules"
+        run: bash tools/test.sh
       - name: "Validate | Keys, entries and archives"
         env:
           BASE_REF: ${{ github.base_ref }}
