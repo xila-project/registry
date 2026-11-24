@@ -85,8 +85,11 @@ check_url() {
   [[ "$value" =~ ^https://([a-z0-9.-]+)(/[A-Za-z0-9._~%+/-]*)$ ]] || return 1
   host="${BASH_REMATCH[1]}" path="${BASH_REMATCH[2]}"
   [[ "$host" == *.* && "$host" != *..* && "$host" != .* && "$host" != *. ]] || return 1
-  # No IP address and no local name.
-  [[ ! "$host" =~ ^[0-9.]+$ && "$host" != localhost && "$host" != *.localhost && "$host" != *.local ]] || return 1
+  # No IP address and no local name. The last label must start with a letter:
+  # the resolver reads a host such as 0x7f.1 or 0251.254.169.254 as an IPv4
+  # address (loopback or link-local), which a digit-only test does not catch.
+  [[ "$host" =~ \.[a-z][a-z0-9-]*$ ]] || return 1
+  [[ "$host" != localhost && "$host" != *.localhost && "$host" != *.local && "$host" != *.internal ]] || return 1
   [[ "/$path/" != */./* && "/$path/" != */../* && "$path" != *//* ]] || return 1
   [[ "$path" == *"$suffix" && ${#path} -gt $((${#suffix} + 1)) ]] || return 1
 }

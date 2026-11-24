@@ -352,6 +352,7 @@ refused() { # <pattern> <NAME=value ...>: refused before any download
     && grep -q -- "$pattern" "$work/submission-work/result.json"
 }
 for url in "http://github.com/a/b/releases/download/v1/a.xpk" "https://127.0.0.1/a.xpk" "https://localhost/a.xpk" \
+  "https://0x7f.1/a.xpk" "https://0xa9.0xfe.0xa9.0xfe/a.xpk" "https://0251.254.169.254/a.xpk" "https://metadata.internal/a.xpk" \
   "https://example.com:8443/a.xpk" "https://user@example.com/a.xpk" "https://example.com/a.xpk?x=1" \
   "https://example.com/a/../b.xpk" "https://example.com/a.zip" "https://example.com/a.xpk
 https://example.com/b.xpk" "https://example.com/\$(id).xpk"; do
