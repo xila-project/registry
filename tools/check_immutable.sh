@@ -9,8 +9,13 @@
 #
 #   One exception, for the move to registry entry format 2: an entry that was
 #   still in format 1 (`minimum_xila_abi`) may be deleted. No supported
-#   xila-package or device can verify those entries or their archives. Every
-#   format 2 entry is immutable.
+#   xila-package or device can verify those entries or their archives.
+#
+#   A second exception, to rename a developer key: an entry may change its
+#   `publisher` and nothing else. The archive URL, SHA-256 and size stay, so the
+#   entry still pins the same archive, and the archive check of validate.sh
+#   proves that the key the new publisher names signed that archive. Every other
+#   change to a format 2 entry is refused.
 set -euo pipefail
 
 base="${1:?usage: check_immutable.sh <base-ref> [repository-directory]}"
@@ -26,6 +31,15 @@ while IFS= read -r entry; do
     && [[ "$(git show "$merge_base:$entry" 2>/dev/null | jq -r '.format_version' 2>/dev/null)" == 1 ]]; then
     printf '%s: removed format 1 entry (no longer verifiable)\n' "$entry"
     continue
+  fi
+  if [[ -f "$entry" ]] && git cat-file -e "$merge_base:$entry" 2>/dev/null; then
+    before="$(git show "$merge_base:$entry")"
+    if [[ "$(jq -cS 'del(.publisher)' <<< "$before" 2>/dev/null)" == "$(jq -cS 'del(.publisher)' "$entry" 2>/dev/null)" ]] \
+      && [[ "$(jq -r '.format_version' <<< "$before" 2>/dev/null)" == 2 ]]; then
+      printf '%s: publisher renamed from %s to %s (same archive)\n' \
+        "$entry" "$(jq -c '.publisher' <<< "$before")" "$(jq -c '.publisher' "$entry")"
+      continue
+    fi
   fi
   changed+="$entry"$'\n'
 done < <(git diff --name-only --no-renames --diff-filter=MDT "$base"...HEAD -- 'packages/*.json')

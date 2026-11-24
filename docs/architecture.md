@@ -47,6 +47,6 @@ A SHA-256 digest or a developer signature alone does not grant permission to exe
 
 ## Constraints
 
-- Published versions are immutable; a new release is a new entry. Before Xila 1.0, a breaking format migration may remove entries that nothing can verify any more; the move to entry format 2 removed the format 1 entries (see the [README](../README.md#publishing-a-version)).
+- Published versions are immutable; a new release is a new entry. Before Xila 1.0, a breaking format migration may remove entries that nothing can verify any more; the move to entry format 2 removed the format 1 entries. A renamed developer key changes only the `publisher` of its entries; the pinned archives stay the same (see the [README](../README.md#publishing-a-version)).
 - Formats and adapters must respect microcontroller memory limits: the package reader streams and never needs an entire archive in memory, and clients fetch one entry rather than a global catalog.
 - Publication never builds or executes contributed code and never uses signing secrets on pull-request code.

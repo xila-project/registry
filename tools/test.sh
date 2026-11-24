@@ -192,6 +192,27 @@ git -C "$repository" commit -q -am "change the archive size"
 expect_failure "changing a published archive size is refused" "archive.size changed" immutable
 git -C "$repository" reset -q --hard HEAD~1
 
+jq -c '.publisher = "renamed-developer"' "$published" > "$work/changed.json" && cp "$work/changed.json" "$published"
+git -C "$repository" commit -q -am "rename the publisher"
+expect_success "changing only the publisher is accepted" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
+jq -c '.publisher = "renamed-developer" | .archive.sha256 = ("0" * 64)' "$published" > "$work/changed.json" && cp "$work/changed.json" "$published"
+git -C "$repository" commit -q -am "rename the publisher and change the archive hash"
+expect_failure "changing the publisher and the archive hash is refused" "archive.sha256 changed" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
+jq -c '.publisher = "renamed-developer" | .display_name = "Renamed"' "$published" > "$work/changed.json" && cp "$work/changed.json" "$published"
+git -C "$repository" commit -q -am "rename the publisher and change the display name"
+expect_failure "changing the publisher and another field is refused" "must not change" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
+printf '{"format_version":1,"name":"xila.legacy","version":"0.1.0","minimum_xila_abi":1,"publisher":"renamed-developer"}' \
+  > "$repository/packages/xila/legacy/0.1.0.json"
+git -C "$repository" commit -q -am "rename the publisher of a format 1 entry"
+expect_failure "changing the publisher of a format 1 entry is refused" "must not change" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
 git -C "$repository" rm -q "packages/example/test/native/1.0.0.json"
 git -C "$repository" commit -q -m "delete a version"
 expect_failure "deleting a published version is refused" "must not change" immutable
