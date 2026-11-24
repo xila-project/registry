@@ -1,0 +1,62 @@
+name: Package submission
+
+# Starts "Submit package" for an issue opened with the "Submit a package"
+# form (label package-submission, which only the form or a maintainer sets).
+# The issue body is untrusted: tools/parse_submission_issue.sh reads it from
+# the event file, and no expression places it in a shell command.
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions: {}
+
+# One run at a time for each issue; a newer edit replaces a pending run.
+concurrency:
+  group: package-submission-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  parse:
+    name: Read the submission form
+    if: >-
+      github.event.issue.state == 'open'
+      && contains(github.event.issue.labels.*.name, 'package-submission')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      archive-url: ${{ steps.parse.outputs.archive-url }}
+      archive-sha256: ${{ steps.parse.outputs.archive-sha256 }}
+      publisher: ${{ steps.parse.outputs.publisher }}
+      public-key: ${{ steps.parse.outputs.public-key }}
+      author: ${{ steps.parse.outputs.author }}
+    steps:
+      - name: "Setup | Checkout registry"
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: "Validate | Read the form fields"
+        id: parse
+        run: bash tools/parse_submission_issue.sh "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
+
+  submit:
+    name: Submit
+    needs: parse
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+      issues: write
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/submit-package.yml
+    with:
+      archive-url: ${{ needs.parse.outputs.archive-url }}
+      archive-sha256: ${{ needs.parse.outputs.archive-sha256 }}
+      publisher: ${{ needs.parse.outputs.publisher }}
+      public-key: ${{ needs.parse.outputs.public-key }}
+      author: ${{ needs.parse.outputs.author }}
+      submitter: ${{ github.event.issue.user.login }}
+      issue: ${{ github.event.issue.number }}
