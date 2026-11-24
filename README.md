@@ -33,11 +33,24 @@ For example, `xila.pixel-painter` 0.2.1 is `packages/xila/pixel-painter/0.2.1.js
 ## Publishing a version
 
 1. Release a signed `.xpk` in your project (for example with the [reusable packaging workflow](https://github.com/xila-project/package_manager/blob/main/docs/reusable-wasm-package-workflow.md)).
-2. Generate its entry with [`xila-package`](https://github.com/xila-project/package_manager/tree/main/crates/builder):
-   ```sh
-   xila-package registry entry app.xpk publisher.pub <publisher-id> https://…/app.xpk packages/<namespace>/<name>/<version>.json
-   ```
-3. Open a pull request. The first contribution of a publisher also adds its `keys/developers/<id>.json`.
+2. Open the [**Submit a package**](https://github.com/xila-project/registry/issues/new?template=submit-package.yml) issue form. Give the HTTPS URL of the `.xpk`, optionally its SHA-256 (the value or the URL of its `.sha256` file), and your publisher identifier. A new publisher also gives its base64 Ed25519 public key and an author name.
+3. Read the comment of the **Package submission** workflow on the issue. It downloads the archive (HTTPS only, at most 16 MiB), verifies its signature with the pinned `xila-package`, generates the entry with `xila-package registry entry`, runs `tools/test.sh` and `tools/validate.sh`, and opens a pull request that closes the issue. If it refuses the submission, correct the issue description: the workflow runs again.
+
+The workflow merges and publishes the pull request without a maintainer only when all of these are true:
+
+- the developer key `keys/developers/<publisher>.json` already exists, and the submission adds no key and no namespace file;
+- the namespace and kind grants of the key cover the package (`xila-package registry check`);
+- the version is new, and no other submission of it is open;
+- the validation passes;
+- the archive is a GitHub release asset (`https://github.com/<owner>/<repository>/releases/download/...`) of the repository that the signed package names in `metadata.source`. This stops a third party who copies a signed archive to its own server and submits it first.
+
+Every other submission waits for a maintainer review. A new publisher gets a key file with `kinds: ["wasm"]`; a maintainer grants `native` or the legacy `xila` namespace in a reviewed change. For an identifier in `io.github.<account>`, submitted from that GitHub account, the workflow also adds the namespace file `namespaces/io.github.<account>.json`. Any other new namespace needs a manual pull request.
+
+To submit by hand instead, generate the entry with [`xila-package`](https://github.com/xila-project/package_manager/tree/main/crates/builder) and open a pull request with it (and, the first time, `keys/developers/<id>.json`):
+
+```sh
+xila-package registry entry app.xpk publisher.pub <publisher-id> https://…/app.xpk packages/<namespace>/<name>/<version>.json
+```
 
 Published versions are **immutable**: a pull request may add entries but never modify or delete one; release a new version instead.
 
@@ -58,7 +71,16 @@ The rename of the publisher `xila-project` to `xila` (#19) was a one-time except
 
 [`tools/sign.sh`](tools/sign.sh) then runs `xila-package registry sign` with the repository key: it writes `_site/` with `root.json`, every key and entry with its `.sig`, and a signed `index.json` valid for 30 days, and verifies the result from `root.pub` as a device would.
 
-**Validate package registry** runs `test.sh` and `validate.sh` on pull requests and on `main`, with read-only permissions and no secrets. **Publish package registry** runs `validate.sh` and `sign.sh` on `main` and weekly (to renew the index before it expires), then deploys `_site/` to GitHub Pages. The repository seed is the `XILA_REGISTRY_SIGNING_SEED_B64` secret of the `github-pages` environment, available only to the signing job; it will move to OpenBao, with new keys, once that is available. Neither workflow builds or executes application code. Run `bash tools/validate.sh` locally (needs `cargo`, `curl`, `git` and `jq`; set `XILA_PACKAGE` to reuse an existing binary).
+**Validate package registry** runs `test.sh` and `validate.sh` on pull requests and on `main`, with read-only permissions and no secrets. **Publish package registry** runs `validate.sh` and `sign.sh` on `main` and weekly (to renew the index before it expires), then deploys `_site/` to GitHub Pages.
+
+**Package submission** reads the issue form ([`tools/parse_submission_issue.sh`](tools/parse_submission_issue.sh)) and calls **Submit package**, a reusable (`workflow_call`) workflow that takes the archive URL as input, so that other triggers can share it. Maintainers can also start it by hand (`workflow_dispatch`, a dry run by default). Its jobs:
+
+- `prepare` (read-only token, no secret) runs `test.sh` and [`tools/submit.sh`](tools/submit.sh), which checks the inputs, downloads and verifies the archive, writes the entry (and the key and namespace files of a new publisher) and runs `validate.sh`. It restores the `xila-package` cache but never saves it, and it uploads only the generated files;
+- `propose` (contents, pull requests and statuses write) runs [`tools/propose_submission.sh`](tools/propose_submission.sh): it accepts only the expected file paths, commits them on the commit that `prepare` validated, opens the pull request, records the `required` status and merges an automatic submission. It never reads the archive;
+- `publish` calls **Publish package registry** after an automatic merge;
+- `report` comments the result ([`tools/report_submission.sh`](tools/report_submission.sh)) and closes the issue when the version is published or already in the registry.
+
+Pull requests and merges made with the workflow token start no other workflow. Therefore **Submit package** validates the exact pull request tree itself, records `required` on it, and calls the publication. The issue text and the archive are untrusted: they reach the scripts only through environment variables and files, nothing from the archive is built or executed, and the signing seed is available only to the publication job. The design and the security analysis are in [issue #21](https://github.com/xila-project/registry/issues/21). The repository seed is the `XILA_REGISTRY_SIGNING_SEED_B64` secret of the `github-pages` environment, available only to the signing job; it will move to OpenBao, with new keys, once that is available. Neither workflow builds or executes application code. Run `bash tools/validate.sh` locally (needs `cargo`, `curl`, `git` and `jq`; set `XILA_PACKAGE` to reuse an existing binary).
 
 ## Root key
 

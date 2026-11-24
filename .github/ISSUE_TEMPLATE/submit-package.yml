@@ -1,0 +1,59 @@
+name: Submit a package
+description: Add a released, signed package version to the registry.
+title: "Submit a package"
+labels: ["package-submission"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Give the URL of a signed `.xpk` that you released. A workflow downloads it, verifies its signature, generates the registry entry, validates the registry and opens a pull request. It reports the result in a comment on this issue.
+
+        - A version of a registered publisher is merged and published automatically when the archive is a GitHub release asset of the source repository that the package names, its namespace and kind are granted to the key, and the version is new.
+        - A new publisher, a new key and every other case wait for a maintainer review.
+        - Published versions are immutable. To change a package, release and submit a new version.
+
+        To correct a refused submission, edit this description: the workflow runs again.
+  - type: input
+    id: archive-url
+    attributes:
+      label: Archive URL
+      description: HTTPS URL of the released `.xpk` (at most 16 MiB), for example `https://github.com/<owner>/<repository>/releases/download/<tag>/<name>.xpk`.
+      placeholder: https://github.com/owner/repository/releases/download/tag/example.xila.weather-1.0.0-wasm32-wasip1.xpk
+    validations:
+      required: true
+  - type: input
+    id: archive-sha256
+    attributes:
+      label: Archive SHA-256
+      description: Optional. The SHA-256 of the archive (64 hexadecimal digits), or the HTTPS URL of its `.sha256` file. The workflow refuses the archive if it differs.
+    validations:
+      required: false
+  - type: input
+    id: publisher
+    attributes:
+      label: Publisher identifier
+      description: Identifier of your developer key, `keys/developers/<publisher>.json`. Lowercase letters, digits and hyphens.
+      placeholder: example-developer
+    validations:
+      required: true
+  - type: input
+    id: public-key
+    attributes:
+      label: Developer public key
+      description: New publishers only. Your raw 32-byte Ed25519 public key in base64 (44 characters), for example `base64 -w0 developer.pub`. The new key may publish Wasm packages only.
+    validations:
+      required: false
+  - type: input
+    id: author
+    attributes:
+      label: Author name
+      description: New publishers only. The name shown for your developer key.
+    validations:
+      required: false
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I control the developer key that signed this archive, and I may publish this package.
+          required: true

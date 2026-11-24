@@ -1,0 +1,224 @@
+name: Submit package
+
+# Adds one released package archive to the registry (issue #21). The issue
+# form workflow (package-submission.yml) calls it, and a maintainer can start
+# it by hand. Every input is untrusted: it reaches the scripts only through
+# environment variables, and tools/submit.sh checks it.
+#
+# Pull requests and merges done with GITHUB_TOKEN start no other workflow, so
+# this workflow runs the validation itself, records the `required` status on
+# the commit that it validated, and calls the publication workflow after an
+# automatic merge.
+
+on:
+  workflow_call:
+    inputs:
+      archive-url:
+        description: HTTPS URL of the released .xpk.
+        type: string
+        required: true
+      archive-sha256:
+        description: SHA-256 of the archive, or HTTPS URL of its .sha256 file.
+        type: string
+        default: ""
+      publisher:
+        description: Developer key identifier of the publisher.
+        type: string
+        required: true
+      public-key:
+        description: Base64 raw Ed25519 public key (new publishers only).
+        type: string
+        default: ""
+      author:
+        description: Author name (new publishers only).
+        type: string
+        default: ""
+      submitter:
+        description: GitHub account that submitted the package.
+        type: string
+        required: true
+      issue:
+        description: Issue to report to and close, or 0.
+        type: number
+        default: 0
+      dry-run:
+        description: Validate only; push, merge and publish nothing.
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      archive-url:
+        description: HTTPS URL of the released .xpk.
+        type: string
+        required: true
+      archive-sha256:
+        description: SHA-256 of the archive, or HTTPS URL of its .sha256 file.
+        type: string
+        default: ""
+      publisher:
+        description: Developer key identifier of the publisher.
+        type: string
+        required: true
+      public-key:
+        description: Base64 raw Ed25519 public key (new publishers only).
+        type: string
+        default: ""
+      author:
+        description: Author name (new publishers only).
+        type: string
+        default: ""
+      dry-run:
+        description: Validate only; push, merge and publish nothing.
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  # Handles the untrusted archive: read-only token, no secret, and the
+  # xila-package cache is restored but never saved.
+  prepare:
+    name: Verify the archive and generate the entry
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      outcome: ${{ steps.submit.outputs.outcome }}
+      base: ${{ steps.submit.outputs.base }}
+      artifact: ${{ steps.submit.outputs.artifact }}
+    steps:
+      - name: "Setup | Checkout registry"
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: "Setup | Restore xila-package"
+        uses: actions/cache/restore@v4
+        with:
+          path: .tools
+          key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Test | Validation rules"
+        run: bash tools/test.sh
+      - name: "Validate | Archive, entry and registry"
+        id: submit
+        env:
+          SUBMISSION_ARCHIVE_URL: ${{ inputs.archive-url }}
+          SUBMISSION_ARCHIVE_SHA256: ${{ inputs.archive-sha256 }}
+          SUBMISSION_PUBLISHER: ${{ inputs.publisher }}
+          SUBMISSION_PUBLIC_KEY: ${{ inputs.public-key }}
+          SUBMISSION_AUTHOR: ${{ inputs.author }}
+          SUBMISSION_SUBMITTER: ${{ inputs.submitter || github.actor }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/submission"
+          mkdir -p "$work"
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          # A unique name: one run can call this workflow several times.
+          echo "artifact=submission-$(cat /proc/sys/kernel/random/uuid)" >> "$GITHUB_OUTPUT"
+          bash tools/submit.sh "$work" 2> >(tee "$work/submit.log" >&2) || true
+          if [[ -f "$work/result.json" ]]; then
+            echo "outcome=$(jq -r '.outcome' "$work/result.json")" >> "$GITHUB_OUTPUT"
+          else
+            echo "outcome=error" >> "$GITHUB_OUTPUT"
+          fi
+      - name: "Report | Upload submission"
+        if: always() && steps.submit.outputs.artifact != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.submit.outputs.artifact }}
+          path: |
+            ${{ runner.temp }}/submission/result.json
+            ${{ runner.temp }}/submission/submit.log
+            ${{ runner.temp }}/submission/files/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Never reads the archive: it commits only the generated data files.
+  propose:
+    name: Open the pull request
+    needs: prepare
+    if: needs.prepare.outputs.outcome == 'automatic' || needs.prepare.outputs.outcome == 'review'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+    outputs:
+      state: ${{ steps.propose.outputs.state }}
+      pull-request: ${{ steps.propose.outputs.pull-request }}
+    steps:
+      - name: "Setup | Checkout the validated commit"
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.prepare.outputs.base }}
+          persist-credentials: false
+      - name: "Setup | Download submission"
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: ${{ runner.temp }}/submission
+      - name: "Publish | Open and merge the pull request"
+        id: propose
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUBMISSION_ISSUE: ${{ inputs.issue || 0 }}
+          SUBMISSION_DRY_RUN: ${{ inputs.dry-run }}
+          SUBMISSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash tools/propose_submission.sh "$RUNNER_TEMP/submission" "$GITHUB_OUTPUT"
+
+  # Pushes and merges done with GITHUB_TOKEN do not start "Publish package
+  # registry", so this run calls it. It checks out main, validates and signs.
+  publish:
+    name: Publish
+    needs: propose
+    if: needs.propose.outputs.state == 'merged'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/publish.yml
+
+  report:
+    name: Report the result
+    needs: [prepare, propose, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: "Setup | Checkout registry"
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: "Setup | Download submission"
+        if: needs.prepare.outputs.artifact != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: ${{ runner.temp }}/submission
+      - name: "Report | Comment on the issue"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ inputs.issue || 0 }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          PROPOSE_STATE: ${{ needs.propose.outputs.state }}
+          PULL_REQUEST: ${{ needs.propose.outputs.pull-request }}
+          PUBLISH_RESULT: ${{ needs.publish.result }}
+          SUBMISSION_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          status=0
+          action="$(bash tools/report_submission.sh "$RUNNER_TEMP/submission" "$RUNNER_TEMP/report.md")" || status=$?
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$ISSUE" != 0 && "$DRY_RUN" != true ]]; then
+            gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/report.md"
+            case "$action" in
+              close-completed) gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed ;;
+              close-not-planned) gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason "not planned" ;;
+            esac
+          fi
+          exit "$status"

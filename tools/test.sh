@@ -221,6 +221,157 @@ git -C "$repository" rm -q "packages/example/test/wasm/1.0.0.json"
 git -C "$repository" commit -q -m "remove a format 1 entry and a format 2 entry"
 expect_failure "removing a format 2 entry alongside is still refused" "packages/example/test/wasm/1.0.0.json" immutable
 
+# ---- Package submission (tools/submit.sh, tools/propose_submission.sh) -------
+
+# A registry checkout with the submission tools. Its validate.sh checks the
+# local archives instead of downloading every entry's archive.
+submission="$work/submission"
+mkdir -p "$submission/tools"
+cp -R "$registry/keys" "$registry/namespaces" "$registry/packages" "$submission/"
+cp "$root/tools/submit.sh" "$root/tools/propose_submission.sh" "$root/tools/report_submission.sh" "$submission/tools/"
+# shellcheck disable=SC2016 # Written to a script, expanded when it runs.
+printf '#!/usr/bin/env bash\nset -euo pipefail\ncd "$(dirname "${BASH_SOURCE[0]}")/.."\n"$XILA_PACKAGE" registry check . --archives "$SUBMISSION_TEST_ARCHIVES"\n' \
+  > "$submission/tools/validate.sh"
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\necho "$XILA_PACKAGE"\n' > "$submission/tools/xila-package.sh"
+git init -q --bare "$work/submission-origin.git"
+git -C "$submission" init -q -b main
+git -C "$submission" config user.name test
+git -C "$submission" config user.email test@example.com
+git -C "$submission" remote add origin "$work/submission-origin.git"
+git -C "$submission" add -A
+git -C "$submission" commit -q -m "registry"
+git -C "$submission" push -q origin main
+
+# A release of example.test.release whose signed manifest names its source
+# repository, as a GitHub release would publish it.
+release_source="$work/source-release"
+"$builder" bundle init "$release_source" example.test.release 2.0.0 wasm32-wasip1 --xila-version 0.1 --standalone >/dev/null
+printf 'test payload release' > "$release_source/executables/main.wasm"
+jq '.metadata = {summary: "Test release.", license: "MIT", source: "https://github.com/Example/Release"}' \
+  "$release_source/xila-package.json" > "$work/release-manifest.json"
+cp "$work/release-manifest.json" "$release_source/xila-package.json"
+"$builder" bundle build "$release_source" "$work/release.app" --signing-key "$work/developer.seed" >/dev/null
+release_name="example.test.release-2.0.0-wasm32-wasip1.xpk"
+mkdir -p "$work/submission-archives"
+"$builder" bundle archive "$work/release.app" "$work/submission-archives/$release_name" >/dev/null
+cp "$archives"/*.xpk "$work/submission-archives/"
+release_archive="$work/submission-archives/$release_name"
+release_url="https://github.com/example/release/releases/download/v2.0.0/$release_name"
+
+submit() { # <archive URL> <publisher> [<archive>] [NAME=value ...]
+  local url="$1" publisher="$2" archive="${3:-$release_archive}"
+  shift 3 || shift $#
+  git -C "$submission" reset -q --hard
+  git -C "$submission" clean -q -fd
+  env XILA_PACKAGE="$builder" SUBMISSION_TEST_ARCHIVES="$work/submission-archives" \
+    SUBMISSION_ARCHIVE_URL="$url" SUBMISSION_PUBLISHER="$publisher" SUBMISSION_ARCHIVE_SHA256= \
+    SUBMISSION_PUBLIC_KEY= SUBMISSION_AUTHOR= SUBMISSION_SUBMITTER=submitter "$@" \
+    bash "$submission/tools/submit.sh" "$work/submission-work" --archive "$archive"
+}
+outcome() { # <expected outcome> <command...>: the command writes result.json
+  local expected="$1"; shift
+  "$@" || true
+  [[ "$(jq -r '.outcome' "$work/submission-work/result.json")" == "$expected" ]] \
+    || { jq . "$work/submission-work/result.json"; return 1; }
+}
+
+expect_success "a new version of a registered publisher from its source repository is automatic" \
+  outcome automatic submit "$release_url" test-developer
+expect_success "the automatic submission adds the entry only" \
+  test "$(jq -c '.files' "$work/submission-work/result.json")" = '["packages/example/test/release/2.0.0.json"]'
+mkdir -p "$work/propose"
+propose() {
+  : > "$work/propose/output"
+  (cd "$submission" && env GITHUB_REPOSITORY=example/registry SUBMISSION_DRY_RUN=true \
+    bash tools/propose_submission.sh "$work/submission-work" "$work/propose/output")
+}
+propose_prepared() {
+  git -C "$submission" reset -q --hard && git -C "$submission" clean -q -fd && propose \
+    && grep -q "^state=dry-run" "$work/propose/output"
+}
+expect_success "the prepared submission commits on a dry run" propose_prepared
+expect_success "the dry-run commit adds the entry only" \
+  test "$(git -C "$submission" show --name-status --format= HEAD)" = "A	packages/example/test/release/2.0.0.json"
+git -C "$submission" reset -q --hard HEAD~1
+mkdir -p "$work/submission-work/files/keys/developers"
+printf '{}' > "$work/submission-work/files/keys/developers/extra.json"
+expect_failure "a submission with an unlisted file is not proposed" "differ from the listed files" propose
+rm "$work/submission-work/files/keys/developers/extra.json"
+jq '.files += ["keys/developers/extra.json"]' "$work/submission-work/result.json" > "$work/result.json"
+cp "$work/result.json" "$work/submission-work/result.json"
+printf '{}' > "$work/submission-work/files/keys/developers/extra.json"
+expect_failure "a submission may only add its entry, key and namespace" "may not add keys/developers/extra.json" propose
+
+expect_success "an archive outside the source repository waits for a review" \
+  outcome review submit "https://example.com/releases/$release_name" test-developer
+expect_success "the review names the reason" \
+  grep -q "not a GitHub release asset" "$work/submission-work/result.json"
+expect_success "a release of another repository waits for a review" \
+  outcome review submit "https://github.com/someone/else/releases/download/v2.0.0/$release_name" test-developer
+expect_success "a matching SHA-256 is accepted" \
+  outcome automatic submit "$release_url" test-developer "$release_archive" \
+  SUBMISSION_ARCHIVE_SHA256="$(sha256sum "$release_archive" | cut -d ' ' -f 1 | tr a-f A-F)"
+expect_success "a different SHA-256 is refused" \
+  outcome invalid submit "$release_url" test-developer "$release_archive" SUBMISSION_ARCHIVE_SHA256="$(printf '0%.0s' {1..64})"
+expect_success "a published version is a duplicate" \
+  outcome duplicate submit "https://example.com/releases/example.test.wasm-1.0.0-wasm32-wasip1.xpk" test-developer \
+  "$archives/example.test.wasm-1.0.0-wasm32-wasip1.xpk"
+expect_success "an archive that the publisher did not sign is refused" \
+  outcome invalid submit "$release_url" other-developer
+expect_success "a different key for a registered publisher is refused" \
+  outcome invalid submit "$release_url" test-developer "$release_archive" SUBMISSION_PUBLIC_KEY="$(base64 -w0 "$work/other.pub")"
+expect_success "an unknown publisher without a key is refused" \
+  outcome invalid submit "$release_url" new-developer
+expect_success "a registered key under a new publisher identifier is refused" \
+  outcome invalid submit "$release_url" new-developer "$release_archive" SUBMISSION_PUBLIC_KEY="$public_key" SUBMISSION_AUTHOR=New
+
+# A new publisher in io.github.<account>, submitted by that account.
+"$builder" key generate "$work/new.seed" "$work/new.pub" >/dev/null
+new_source="$work/source-new"
+"$builder" bundle init "$new_source" io.github.submitter.tool 1.0.0 wasm32-wasip1 --xila-version 0.1 --standalone >/dev/null
+printf 'test payload new' > "$new_source/executables/main.wasm"
+"$builder" bundle build "$new_source" "$work/new.app" --signing-key "$work/new.seed" >/dev/null
+new_name="io.github.submitter.tool-1.0.0-wasm32-wasip1.xpk"
+"$builder" bundle archive "$work/new.app" "$work/submission-archives/$new_name" >/dev/null
+new_url="https://github.com/submitter/tool/releases/download/v1.0.0/$new_name"
+expect_success "a new publisher waits for a review" \
+  outcome review submit "$new_url" new-developer "$work/submission-archives/$new_name" \
+  SUBMISSION_PUBLIC_KEY="$(base64 -w0 "$work/new.pub")" SUBMISSION_AUTHOR="New Developer"
+expect_success "a new publisher adds a Wasm-only key and its io.github namespace" \
+  test "$(jq -c '[.files, (input | .kinds), (input | .owner)]' "$work/submission-work/result.json" \
+    "$submission/keys/developers/new-developer.json" "$submission/namespaces/io.github.submitter.json")" \
+  = '[["keys/developers/new-developer.json","packages/io/github/submitter/tool/1.0.0.json","namespaces/io.github.submitter.json"],["wasm"],{"kind":"github","name":"submitter"}]'
+expect_success "an io.github namespace of another account is refused" \
+  outcome invalid submit "$new_url" new-developer "$work/submission-archives/$new_name" \
+  SUBMISSION_PUBLIC_KEY="$(base64 -w0 "$work/new.pub")" SUBMISSION_AUTHOR="New Developer" SUBMISSION_SUBMITTER=someone-else
+
+refused() { # <pattern> <NAME=value ...>: refused before any download
+  local pattern="$1"; shift
+  outcome invalid submit "$release_url" test-developer "$release_archive" "$@" \
+    && grep -q -- "$pattern" "$work/submission-work/result.json"
+}
+for url in "http://github.com/a/b/releases/download/v1/a.xpk" "https://127.0.0.1/a.xpk" "https://localhost/a.xpk" \
+  "https://0x7f.1/a.xpk" "https://0xa9.0xfe.0xa9.0xfe/a.xpk" "https://0251.254.169.254/a.xpk" "https://metadata.internal/a.xpk" \
+  "https://example.com:8443/a.xpk" "https://user@example.com/a.xpk" "https://example.com/a.xpk?x=1" \
+  "https://example.com/a/../b.xpk" "https://example.com/a.zip" "https://example.com/a.xpk
+https://example.com/b.xpk" "https://example.com/\$(id).xpk"; do
+  expect_success "the archive URL $(printf '%q' "$url") is refused" \
+    refused "archive URL must be" SUBMISSION_ARCHIVE_URL="$url"
+done
+expect_success "an invalid publisher identifier is refused" outcome invalid submit "$release_url" Bad_Publisher
+expect_success "an invalid SHA-256 is refused" refused "SHA-256 must be" SUBMISSION_ARCHIVE_SHA256=1234
+# shellcheck disable=SC2016 # A literal command substitution, as untrusted input.
+expect_success "an invalid public key is refused" refused "public key must be" SUBMISSION_PUBLIC_KEY='$(id)'
+expect_success "an author name with a backtick is refused" refused "author name must" SUBMISSION_AUTHOR='a`b'
+
+report_refused() {
+  local status=0
+  bash "$submission/tools/report_submission.sh" "$work/submission-work" "$work/report.md" >/dev/null || status=$?
+  [[ $status -eq 1 ]] && grep -q "was refused" "$work/report.md" && ! grep -q 'a`b' "$work/report.md"
+}
+expect_success "a refused submission is reported without backticks from the input" report_refused
+
 if [[ $failures -ne 0 ]]; then
   printf '%s validation test(s) failed\n' "$failures" >&2
   exit 1

@@ -19,8 +19,8 @@ An entry pins its archive by SHA-256 and size, so it transitively pins the signe
 
 ## Static distribution model
 
-1. A developer releases a signed, immutable `.xpk` and submits its generated entry (and, the first time, its developer key).
-2. Validation checks keys, placement, namespace authorization and each archive; a maintainer reviews provenance, content and permissions.
+1. A developer releases a signed, immutable `.xpk` and submits its URL with the issue form, which generates the entry (and, the first time, the developer key file) and opens a pull request. A manual pull request with a generated entry is also possible.
+2. Validation checks keys, placement, namespace authorization and each archive. A maintainer reviews provenance, content and permissions, except for a new version of a registered publisher released in the source repository that the package names, which is merged automatically (see the [README](../README.md#publishing-a-version)).
 3. `main` is published unchanged to GitHub Pages. Archives are fetched from their release URLs; because entries pin their hash, any mirror or CDN can serve them without being trusted.
 4. A client resolves `xila.clock` to `packages/xila/clock/<version>.json`, downloads the archive, and verifies it end to end before installing.
 
@@ -49,4 +49,4 @@ A SHA-256 digest or a developer signature alone does not grant permission to exe
 
 - Published versions are immutable; a new release is a new entry. Before Xila 1.0, a breaking format migration may remove entries that nothing can verify any more; the move to entry format 2 removed the format 1 entries. The rename of the publisher `xila-project` to `xila` changed only the `publisher` of the existing entries, once (see the [README](../README.md#publishing-a-version)).
 - Formats and adapters must respect microcontroller memory limits: the package reader streams and never needs an entire archive in memory, and clients fetch one entry rather than a global catalog.
-- Publication never builds or executes contributed code and never uses signing secrets on pull-request code.
+- Publication never builds or executes contributed code and never uses signing secrets on pull-request code. The submission workflow handles the untrusted issue text and archive in a job with a read-only token and no secret.
