@@ -17,14 +17,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Validate and publish registry metadata
+  build:
+    name: Validate and sign registry metadata
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
+    # The environment provides the repository signing seed.
     environment:
       name: github-pages
     steps:
@@ -43,11 +40,27 @@ jobs:
         env:
           XILA_REGISTRY_SIGNING_SEED_B64: ${{ secrets.XILA_REGISTRY_SIGNING_SEED_B64 }}
         run: bash tools/sign.sh
-      - name: "Publish | Configure Pages"
-        uses: actions/configure-pages@v5
       - name: "Publish | Upload registry site"
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: _site/
+
+  # The deployment runs in its own job. `actions/deploy-pages` lists the
+  # artifacts of the run once, without retry. The artifact service lists a new
+  # artifact up to a few seconds after the upload step ends. In the same job,
+  # the listing came back empty and the deployment failed (issue #16).
+  deploy:
+    name: Deploy registry metadata to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: "Publish | Deploy Pages"
-        uses: actions/deploy-pages@v4
+        id: deployment
+        uses: actions/deploy-pages@v5
