@@ -16,11 +16,14 @@ set -euo pipefail
 base="${1:?usage: check_immutable.sh <base-ref> [repository-directory]}"
 cd "${2:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 
+# Entries are read at the merge base, the same revision `base...HEAD` compares.
+merge_base="$(git merge-base "$base" HEAD)"
+
 changed=""
 while IFS= read -r entry; do
   [[ -n "$entry" ]] || continue
   if [[ ! -e "$entry" ]] \
-    && [[ "$(git show "$base:$entry" 2>/dev/null | jq -r '.format_version' 2>/dev/null)" == 1 ]]; then
+    && [[ "$(git show "$merge_base:$entry" 2>/dev/null | jq -r '.format_version' 2>/dev/null)" == 1 ]]; then
     printf '%s: removed format 1 entry (no longer verifiable)\n' "$entry"
     continue
   fi
@@ -32,9 +35,9 @@ if [[ -z "$changed" ]]; then
   exit 0
 fi
 while IFS= read -r entry; do
-  if git cat-file -e "$base:$entry" 2>/dev/null && [[ -f "$entry" ]]; then
+  if git cat-file -e "$merge_base:$entry" 2>/dev/null && [[ -f "$entry" ]]; then
     for field in .archive.url .archive.sha256 .archive.size; do
-      before="$(git show "$base:$entry" | jq -c "$field")"
+      before="$(git show "$merge_base:$entry" | jq -c "$field")"
       after="$(jq -c "$field" "$entry")"
       if [[ "$before" != "$after" ]]; then
         printf '%s: published %s changed from %s to %s\n' "$entry" "${field#.}" "$before" "$after" >&2

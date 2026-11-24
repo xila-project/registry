@@ -56,7 +56,7 @@ Before Xila 1.0, a breaking format migration may replace entries that no support
 
 [`tools/sign.sh`](tools/sign.sh) then runs `xila-package registry sign` with the repository key: it writes `_site/` with `root.json`, every key and entry with its `.sig`, and a signed `index.json` valid for 30 days, and verifies the result from `root.pub` as a device would.
 
-**Validate package registry** runs `test.sh` and `validate.sh` on pull requests and on `main`, with read-only permissions and no secrets. **Publish package registry** runs both scripts on `main` and weekly (to renew the index before it expires), then deploys `_site/` to GitHub Pages. The repository seed is the `XILA_REGISTRY_SIGNING_SEED_B64` secret of the `github-pages` environment, available only to that job; it will move to OpenBao, with new keys, once that is available. Neither workflow builds or executes application code. Run `bash tools/validate.sh` locally (needs `cargo`, `curl`, `git` and `jq`; set `XILA_PACKAGE` to reuse an existing binary).
+**Validate package registry** runs `test.sh` and `validate.sh` on pull requests and on `main`, with read-only permissions and no secrets. **Publish package registry** runs `validate.sh` and `sign.sh` on `main` and weekly (to renew the index before it expires), then deploys `_site/` to GitHub Pages. The repository seed is the `XILA_REGISTRY_SIGNING_SEED_B64` secret of the `github-pages` environment, available only to that job; it will move to OpenBao, with new keys, once that is available. Neither workflow builds or executes application code. Run `bash tools/validate.sh` locally (needs `cargo`, `curl`, `git` and `jq`; set `XILA_PACKAGE` to reuse an existing binary).
 
 ## Root key
 

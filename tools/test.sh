@@ -197,6 +197,12 @@ git -C "$repository" commit -q -m "delete a version"
 expect_failure "deleting a published version is refused" "must not change" immutable
 git -C "$repository" reset -q --hard HEAD~1
 
+printf '{"format_version":1,"name":"xila.legacy","version":"0.1.0","minimum_xila_abi":2}' \
+  > "$repository/packages/xila/legacy/0.1.0.json"
+git -C "$repository" commit -q -am "edit a format 1 entry"
+expect_failure "editing a format 1 entry is refused" "must not change" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
 git -C "$repository" rm -q "packages/xila/legacy/0.1.0.json"
 git -C "$repository" commit -q -m "remove a format 1 entry"
 expect_success "removing a format 1 entry is accepted" immutable
