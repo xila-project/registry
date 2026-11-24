@@ -129,7 +129,25 @@ gh api --method POST "repos/$GITHUB_REPOSITORY/statuses/$head" \
   -f description="Validated by the package submission workflow" >/dev/null
 
 if [[ "$outcome" == automatic ]]; then
-  if gh pr merge "$pull_request" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "$head"; then
+  # GitHub computes whether the pull request is mergeable after it records the
+  # status, so the first attempt can fail with a transient policy error. Try a
+  # few times. A real refusal (for example a ruleset) fails every attempt, and
+  # the pull request then waits for a maintainer.
+  merged=false
+  for attempt in 1 2 3 4 5 6; do
+    if gh pr merge "$pull_request" --repo "$GITHUB_REPOSITORY" --squash --match-head-commit "$head"; then
+      merged=true
+      break
+    fi
+    echo "merge attempt $attempt failed" >&2
+    # The merge can succeed and a later step of the command can fail.
+    if [[ "$(gh pr view "$pull_request" --repo "$GITHUB_REPOSITORY" --json state --jq .state)" == MERGED ]]; then
+      merged=true
+      break
+    fi
+    sleep 5
+  done
+  if [[ "$merged" == true ]]; then
     printf 'state=merged\npull-request=%s\n' "$pull_request" >> "$output"
   else
     printf 'state=merge-failed\npull-request=%s\n' "$pull_request" >> "$output"
