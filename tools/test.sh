@@ -167,6 +167,11 @@ cp -R "$registry/keys" "$registry/packages" "$repository/"
 mkdir -p "$repository/packages/xila/legacy"
 printf '{"format_version":1,"name":"xila.legacy","version":"0.1.0","minimum_xila_abi":1}' \
   > "$repository/packages/xila/legacy/0.1.0.json"
+# An entry still published under the publisher `xila-project`, which the
+# one-time migration (registry#19) may rename to `xila`. Remove with the migration.
+mkdir -p "$repository/packages/xila/migrated"
+jq -c '.publisher = "xila-project"' "$registry/packages/example/test/wasm/1.0.0.json" \
+  > "$repository/packages/xila/migrated/1.0.0.json"
 git -C "$repository" init -q -b main
 git -C "$repository" config user.name test
 git -C "$repository" config user.email test@example.com
@@ -192,19 +197,41 @@ git -C "$repository" commit -q -am "change the archive size"
 expect_failure "changing a published archive size is refused" "archive.size changed" immutable
 git -C "$repository" reset -q --hard HEAD~1
 
-jq -c '.publisher = "renamed-developer"' "$published" > "$work/changed.json" && cp "$work/changed.json" "$published"
-git -C "$repository" commit -q -am "rename the publisher"
-expect_success "changing only the publisher is accepted" immutable
+# One-time migration of the publisher `xila-project` to `xila` (registry#19).
+# Remove these cases with the migration.
+migrated="$repository/packages/xila/migrated/1.0.0.json"
+change_migrated() { # <jq filter> <commit message>
+  jq -c "$1" "$migrated" > "$work/changed.json" && cp "$work/changed.json" "$migrated"
+  git -C "$repository" commit -q -am "$2"
+}
+
+change_migrated '.publisher = "xila"' "rename the publisher to xila"
+expect_success "migration: xila-project renamed to xila is accepted" immutable
 git -C "$repository" reset -q --hard HEAD~1
 
-jq -c '.publisher = "renamed-developer" | .archive.sha256 = ("0" * 64)' "$published" > "$work/changed.json" && cp "$work/changed.json" "$published"
-git -C "$repository" commit -q -am "rename the publisher and change the archive hash"
-expect_failure "changing the publisher and the archive hash is refused" "archive.sha256 changed" immutable
+change_migrated '.publisher = "renamed-developer"' "rename the publisher to another value"
+expect_failure "migration: xila-project renamed to another value is refused" "must not change" immutable
 git -C "$repository" reset -q --hard HEAD~1
 
-jq -c '.publisher = "renamed-developer" | .display_name = "Renamed"' "$published" > "$work/changed.json" && cp "$work/changed.json" "$published"
-git -C "$repository" commit -q -am "rename the publisher and change the display name"
-expect_failure "changing the publisher and another field is refused" "must not change" immutable
+change_migrated '.publisher = "xila" | .archive.sha256 = ("0" * 64)' "rename the publisher and change the archive hash"
+expect_failure "migration: the rename with a changed archive hash is refused" "archive.sha256 changed" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
+change_migrated '.publisher = "xila" | .display_name = "Renamed"' "rename the publisher and change the display name"
+expect_failure "migration: the rename with another changed field is refused" "must not change" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
+change_migrated '.publisher = "xila" | .extra = true' "rename the publisher and add a field"
+expect_failure "migration: the rename with an added field is refused" "must not change" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
+change_migrated '.display_name = "Renamed"' "change the display name only"
+expect_failure "migration: a change that is not the publisher is refused" "must not change" immutable
+git -C "$repository" reset -q --hard HEAD~1
+
+jq -c '.publisher = "xila"' "$published" > "$work/changed.json" && cp "$work/changed.json" "$published"
+git -C "$repository" commit -q -am "rename the publisher of an entry that is not xila-project"
+expect_failure "migration: renaming another publisher to xila is refused" "must not change" immutable
 git -C "$repository" reset -q --hard HEAD~1
 
 printf '{"format_version":1,"name":"xila.legacy","version":"0.1.0","minimum_xila_abi":1,"publisher":"renamed-developer"}' \

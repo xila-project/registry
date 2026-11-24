@@ -43,18 +43,18 @@ Published versions are **immutable**: a pull request may add entries but never m
 
 Before Xila 1.0, a breaking format migration may replace entries that no supported `xila-package` or device can verify any more. The move to registry entry format 2 did so: the format 1 entries (`minimum_xila_abi`, applications 0.1.0) were removed, since the current package format cannot read their archives, and the applications are republished in format 2 from 0.2.1. `tools/check_immutable.sh` allows removing a format 1 entry.
 
-A developer key may be renamed. Its entries then change their `publisher` and nothing else: the archive URL, SHA-256 and size stay, so each entry still pins the same archive, and the archive check proves that the renamed key signed it. The entry is signed again at the next publication. The `xila-project` key became `xila` this way (#19). Every other change to a format 2 entry is refused.
+The rename of the publisher `xila-project` to `xila` (#19) was a one-time exception: the 15 published entries changed their `publisher` and nothing else. The archive URL, SHA-256 and size stayed, so each entry still pinned the same archive, and the archive check proved that the key `xila` signed it. `tools/check_immutable.sh` accepted that change for that pull request only, and a follow-up pull request removed the exception. Every format 2 entry is immutable.
 
 ## Validation and publication
 
 [`tools/validate.sh`](tools/validate.sh) installs `xila-package` at the package_manager revision pinned in [`tools/xila-package.sh`](tools/xila-package.sh), then:
 
-- refuses changes to already published entries, naming the archive URL, SHA-256 or size that changed, except the removal of a format 1 entry and a change of `publisher` alone (pull requests, [`tools/check_immutable.sh`](tools/check_immutable.sh));
+- refuses changes to already published entries, naming the archive URL, SHA-256 or size that changed, except the removal of a format 1 entry (pull requests, [`tools/check_immutable.sh`](tools/check_immutable.sh));
 - downloads every entry's archive (HTTPS only, redirects included, at most 5 redirects, 16 MiB and 120 seconds each) and runs `xila-package registry check --archives`, which checks key files, entry placement and canonical form, namespace and kind (Wasm or native) authorization, and each archive's size, SHA-256, signature and copied fields. An archive replaced after publication no longer matches its entry, so every run also detects altered releases;
 - rehearses signing ([`tools/rehearse_signing.sh`](tools/rehearse_signing.sh)): it signs a copy with throwaway root and repository keys and verifies the result from the throwaway root key, as a device does, so every key and entry is proven to be signed by a repository key and listed in the index, without any secret;
 - builds an unsigned `_site/` preview from `keys/`, `namespaces/` and `packages/`.
 
-[`tools/test.sh`](tools/test.sh) tests these rules against fixtures generated on the fly with test-only keys (nothing in the repository is a private key): a signed Wasm and a signed native package in a reverse-DNS namespace and a signed legacy `xila.<name>` package, and cases for each developer key kind, namespace file and the legacy grant, truncated and altered archives, altered, unsigned, foreign-signed and unlisted metadata, a signing key that `root.json` does not list, changed or deleted published entries, a renamed publisher, and the removal of a format 1 entry.
+[`tools/test.sh`](tools/test.sh) tests these rules against fixtures generated on the fly with test-only keys (nothing in the repository is a private key): a signed Wasm and a signed native package in a reverse-DNS namespace and a signed legacy `xila.<name>` package, and cases for each developer key kind, namespace file and the legacy grant, truncated and altered archives, altered, unsigned, foreign-signed and unlisted metadata, a signing key that `root.json` does not list, changed or deleted published entries, and the removal of a format 1 entry.
 
 [`tools/sign.sh`](tools/sign.sh) then runs `xila-package registry sign` with the repository key: it writes `_site/` with `root.json`, every key and entry with its `.sig`, and a signed `index.json` valid for 30 days, and verifies the result from `root.pub` as a device would.
 
