@@ -369,9 +369,28 @@ for codepoint in 00ad 200b 200c 200d 200e 200f 2028 2029 202e 2060 2066 feff; do
   expect_success "an author name with U+$codepoint is refused" \
     refused "author name must" SUBMISSION_AUTHOR="$author"
 done
+# U+0085 (NEL) is a control character (category Cc) that the [[:cntrl:]] shell
+# test misses under LC_ALL=C, where its bytes are not ASCII control bytes: the
+# jq test must refuse it in every locale. Its UTF-8 bytes are written directly
+# because printf \u output depends on the locale.
+expect_success "an author name with U+0085 is refused under LC_ALL=C" \
+  refused "author name must" LC_ALL=C SUBMISSION_AUTHOR="$(printf 'a\xc2\x85b')"
+# Non-BMP tag characters (category Cf, the usual hidden-text vector): printf \u
+# cannot produce them, so their UTF-8 bytes are written directly (U+E0001 is
+# f3 a0 80 81 and U+E0020 is f3 a0 80 a0).
+expect_success "an author name with U+E0001 is refused" \
+  refused "author name must" SUBMISSION_AUTHOR="$(printf 'a\xf3\xa0\x80\x81b')"
+expect_success "an author name with U+E0020 is refused" \
+  refused "author name must" SUBMISSION_AUTHOR="$(printf 'a\xf3\xa0\x80\xa0b')"
 expect_success "an author name with accented letters is accepted" \
   outcome review submit "$new_url" new-developer "$work/submission-archives/$new_name" \
   SUBMISSION_PUBLIC_KEY="$(base64 -w0 "$work/new.pub")" SUBMISSION_AUTHOR="Zoë Müller"
+expect_success "an author name with an apostrophe is accepted" \
+  outcome review submit "$new_url" new-developer "$work/submission-archives/$new_name" \
+  SUBMISSION_PUBLIC_KEY="$(base64 -w0 "$work/new.pub")" SUBMISSION_AUTHOR="O'Brien"
+expect_success "an author name with a hyphen is accepted" \
+  outcome review submit "$new_url" new-developer "$work/submission-archives/$new_name" \
+  SUBMISSION_PUBLIC_KEY="$(base64 -w0 "$work/new.pub")" SUBMISSION_AUTHOR="Jean-Luc"
 expect_success "an author name with a backtick is refused" refused "author name must" SUBMISSION_AUTHOR='a`b'
 
 report_refused() {

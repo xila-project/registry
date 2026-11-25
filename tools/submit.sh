@@ -112,11 +112,14 @@ if [[ -n "$public_key" && ! "$public_key" =~ ^[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048
   refuse "the public key must be the base64 form of a raw 32-byte Ed25519 key (44 characters, ending with =)"
 fi
 if [[ -n "$author" ]]; then
-  # The jq test also refuses the Unicode format characters (category Cf, for
-  # example U+202E, U+200B..U+200F or U+FEFF) and the U+2028/U+2029 separators:
-  # they are invisible or reorder what a reviewer sees.
+  # The jq test also refuses the Unicode control characters (category Cc, for
+  # example U+0085, which the [[:cntrl:]] test above misses under LC_ALL=C), the
+  # format characters (category Cf, for example U+202E, U+200B..U+200F or
+  # U+FEFF) and the U+2028/U+2029 separators: they are invisible or reorder
+  # what a reviewer sees. Unlike the shell test, the jq test does not depend on
+  # the locale.
   if [[ ${#author} -gt 128 || "$author" =~ [[:cntrl:]\`\<\>] ]] \
-    || ! jq -n -e --arg author "$author" '$author | test("[\\p{Cf}\\p{Zl}\\p{Zp}]") | not' >/dev/null; then
+    || ! jq -n -e --arg author "$author" '$author | test("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]") | not' >/dev/null; then
     refuse "the author name must have at most 128 characters, without control characters, backticks, angle brackets or Unicode format characters"
   fi
 fi
