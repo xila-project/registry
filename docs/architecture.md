@@ -28,7 +28,7 @@ There is deliberately **no mandatory search** endpoint or dynamic server; a sear
 
 ## Trust model
 
-Devices will trust only the **repository key** and verify: repository key → developer key (authorized by the namespace file covering the identifier, or by the legacy `xila.<name>` grant, and by its package kinds) → package signature → file hashes. Two keys, two checks: the developer signature stays on the archive end to end, and the repository key vouches for both the entry and the developer key.
+Devices trust only the registry's **root key**. The root key is kept offline and signs only `root.json`. `root.json` lists the online **repository keys**. A repository key signs registry entries, developer keys, namespace files and the index. A device pins `root.pub` and verifies: root key, then repository key (from `root.json`), then developer key (authorized by the namespace file covering the identifier, or by the legacy `xila.<name>` grant, and by its package kinds), then package signature, then file hashes. Two keys, two checks: the developer signature stays on the archive end to end, and the repository key vouches for both the entry and the developer key.
 
 The formats and checks are specified in [package_manager's registry trust model](https://github.com/xila-project/package_manager/blob/main/docs/registry-trust.md):
 
@@ -37,7 +37,6 @@ The formats and checks are specified in [package_manager's registry trust model]
 
 **Not implemented yet:**
 
-- Devices: the on-device installer still trusts a single developer key; it must verify from the pinned root key.
 - Publishing every intermediate `root.json` version, needed once the root key rotates.
 - A developer-key **revocation** list (until then, removing a key and re-signing is noticed by devices with a fresh index).
 
