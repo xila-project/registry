@@ -363,6 +363,15 @@ expect_success "an invalid publisher identifier is refused" outcome invalid subm
 expect_success "an invalid SHA-256 is refused" refused "SHA-256 must be" SUBMISSION_ARCHIVE_SHA256=1234
 # shellcheck disable=SC2016 # A literal command substitution, as untrusted input.
 expect_success "an invalid public key is refused" refused "public key must be" SUBMISSION_PUBLIC_KEY='$(id)'
+for codepoint in 00ad 200b 200c 200d 200e 200f 2028 2029 202e 2060 2066 feff; do
+  # shellcheck disable=SC2059 # The format is a fixed \u escape plus a hexadecimal codepoint from the list above.
+  author="a$(printf "\\u$codepoint")b"
+  expect_success "an author name with U+$codepoint is refused" \
+    refused "author name must" SUBMISSION_AUTHOR="$author"
+done
+expect_success "an author name with accented letters is accepted" \
+  outcome review submit "$new_url" new-developer "$work/submission-archives/$new_name" \
+  SUBMISSION_PUBLIC_KEY="$(base64 -w0 "$work/new.pub")" SUBMISSION_AUTHOR="Zoë Müller"
 expect_success "an author name with a backtick is refused" refused "author name must" SUBMISSION_AUTHOR='a`b'
 
 report_refused() {
