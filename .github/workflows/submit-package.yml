@@ -74,15 +74,11 @@ on:
 
 permissions: {}
 
-# Serialize direct dispatches (e.g. multi-package release runs) so each run
-# validates against the latest main without racing on pull-request merges.
-concurrency:
-  group: submit-package
-  cancel-in-progress: false
-
 jobs:
-  # Handles the untrusted archive: read-only token, no secret, and the
-  # xila-package cache is restored but never saved.
+  # Handles the untrusted archive: read-only token, no environment, and no
+  # secret references (never reference `secrets.*` in this job; `secrets:
+  # inherit` is forwarded only for `publish`'s `github-pages` environment).
+  # The xila-package cache is restored but never saved.
   prepare:
     name: Verify the archive and generate the entry
     runs-on: ubuntu-latest

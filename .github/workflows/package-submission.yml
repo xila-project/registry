@@ -43,7 +43,8 @@ jobs:
 
   # `secrets: inherit` is required for the nested `publish.yml` job to read
   # the `github-pages` environment signing seed after an automatic merge.
-  # `prepare` and `propose` do not use that environment and cannot read it.
+  # `prepare` and `propose` declare no `environment:` (so they cannot read
+  # that environment secret) and must never reference `secrets.*`.
   submit:
     name: Submit
     needs: parse
