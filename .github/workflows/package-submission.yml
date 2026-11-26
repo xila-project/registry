@@ -41,6 +41,9 @@ jobs:
         id: parse
         run: bash tools/parse_submission_issue.sh "$GITHUB_EVENT_PATH" >> "$GITHUB_OUTPUT"
 
+  # `secrets: inherit` is required for the nested `publish.yml` job to read
+  # the `github-pages` environment signing seed after an automatic merge.
+  # `prepare` and `propose` do not use that environment and cannot read it.
   submit:
     name: Submit
     needs: parse
@@ -52,6 +55,7 @@ jobs:
       pages: write
       id-token: write
     uses: ./.github/workflows/submit-package.yml
+    secrets: inherit
     with:
       archive-url: ${{ needs.parse.outputs.archive-url }}
       archive-sha256: ${{ needs.parse.outputs.archive-sha256 }}

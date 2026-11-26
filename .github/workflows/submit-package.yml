@@ -74,6 +74,12 @@ on:
 
 permissions: {}
 
+# Serialize direct dispatches (e.g. multi-package release runs) so each run
+# validates against the latest main without racing on pull-request merges.
+concurrency:
+  group: submit-package
+  cancel-in-progress: false
+
 jobs:
   # Handles the untrusted archive: read-only token, no secret, and the
   # xila-package cache is restored but never saved.
@@ -178,6 +184,7 @@ jobs:
       pages: write
       id-token: write
     uses: ./.github/workflows/publish.yml
+    secrets: inherit
 
   report:
     name: Report the result
