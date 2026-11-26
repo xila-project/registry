@@ -75,8 +75,10 @@ on:
 permissions: {}
 
 jobs:
-  # Handles the untrusted archive: read-only token, no secret, and the
-  # xila-package cache is restored but never saved.
+  # Handles the untrusted archive: read-only token, no environment, and no
+  # secret references (never reference `secrets.*` in this job; `secrets:
+  # inherit` is forwarded only for `publish`'s `github-pages` environment).
+  # The xila-package cache is restored but never saved.
   prepare:
     name: Verify the archive and generate the entry
     runs-on: ubuntu-latest
@@ -178,6 +180,7 @@ jobs:
       pages: write
       id-token: write
     uses: ./.github/workflows/publish.yml
+    secrets: inherit
 
   report:
     name: Report the result
