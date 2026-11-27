@@ -39,6 +39,11 @@ jobs:
         with:
           path: .tools
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      # The signing job runs xila-package from this cache: verify the binary
+      # against the digest pinned in tools/xila-package.sh before it runs
+      # (issue #24). A mismatch fails the job and stops the publication.
+      - name: "Setup | Install and verify xila-package"
+        run: bash tools/xila-package.sh
       - name: "Validate | Keys, entries and archives"
         run: bash tools/validate.sh
       - name: "Sign | Registry metadata with the repository key"

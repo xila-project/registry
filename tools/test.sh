@@ -284,6 +284,7 @@ mkdir -p "$work/propose"
 propose() {
   : > "$work/propose/output"
   (cd "$submission" && env GITHUB_REPOSITORY=example/registry SUBMISSION_DRY_RUN=true \
+    XILA_PACKAGE="$builder" \
     bash tools/propose_submission.sh "$work/submission-work" "$work/propose/output")
 }
 propose_prepared() {
@@ -302,6 +303,75 @@ jq '.files += ["keys/developers/extra.json"]' "$work/submission-work/result.json
 cp "$work/result.json" "$work/submission-work/result.json"
 printf '{}' > "$work/submission-work/files/keys/developers/extra.json"
 expect_failure "a submission may only add its entry, key and namespace" "may not add keys/developers/extra.json" propose
+
+# The pinned xila-package binary is verified against its committed digest
+# before it runs (issue #24).
+expect_failure "a binary that is not the pinned one is refused" "digest mismatch" \
+  bash "$root/tools/xila-package.sh" --verify /bin/true
+expect_success "a local XILA_PACKAGE override is printed without verification" \
+  test "$(XILA_PACKAGE="$builder" bash "$root/tools/xila-package.sh")" = "$builder"
+
+# The propose job validates the final tree offline (issue #24): an entry that
+# does not sit at its own path is refused after the commit, before anything is
+# pushed, recorded or merged.
+outcome automatic submit "$release_url" test-developer
+tampered="$work/submission-work/files/packages/example/test/release/2.0.0.json"
+jq -c '.version = "9.9.9"' "$tampered" > "$work/changed.json" && cp "$work/changed.json" "$tampered"
+git -C "$submission" reset -q --hard && git -C "$submission" clean -q -fd
+expect_failure "the final tree is checked offline before it is proposed" 'must be at\|not canonical' propose
+git -C "$submission" reset -q --hard origin/main
+
+# A stub gh for the supersede tests (issue #25): it logs every call and answers
+# an open review pull request on the submission branch.
+mkdir -p "$work/bin"
+cat > "$work/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh $*" >> "${GH_STUB_LOG:?GH_STUB_LOG is not set}"
+case "$*" in
+  *"pr list"*) printf '{"url":"https://example.test/pr/1","body":"<!-- package-submission-outcome: review --> A maintainer must review it"}\n' ;;
+  *"pr view"*) printf 'MERGED\n' ;;
+  *) printf 'https://example.test/pr/2\n' ;;
+esac
+STUB
+chmod +x "$work/bin/gh"
+propose_full() { # A real (non-dry) run against the local origin, with the stub gh.
+  : > "$work/propose/output"
+  : > "$work/gh.log"
+  (cd "$submission" && env GITHUB_REPOSITORY=example/registry SUBMISSION_DRY_RUN=false GH_TOKEN=dummy \
+    XILA_PACKAGE="$builder" PATH="$work/bin:$PATH" GH_STUB_LOG="$work/gh.log" \
+    bash tools/propose_submission.sh "$work/submission-work" "$work/propose/output")
+}
+absent() { # <pattern> <file>: succeeds when the pattern is not in the file
+  ! grep -q -- "$1" "$2"
+}
+
+# An automatic submission finds the open review pull request on its branch,
+# closes it with a comment, deletes the branch and continues to the merge.
+outcome automatic submit "$release_url" test-developer
+git -C "$submission" push -q origin main:refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+expect_success "an automatic submission supersedes the review pull request and merges" propose_full
+expect_success "the superseded pull request is commented" \
+  grep -q "pr comment https://example.test/pr/1" "$work/gh.log"
+expect_success "the superseded pull request is closed" \
+  grep -q "pr close https://example.test/pr/1" "$work/gh.log"
+expect_success "the superseded branch is deleted" \
+  grep -q "DELETE repos/example/registry/git/refs/heads/submission/example.test.release/2.0.0" "$work/gh.log"
+expect_success "the automatic submission merges after the supersede" \
+  grep -q '^state=merged' "$work/propose/output"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
+
+# A submission for review never closes or deletes anything: it stays pending.
+outcome review submit "https://example.com/releases/$release_name" test-developer
+git -C "$submission" push -q origin main:refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+expect_success "a review submission stays pending on an existing branch" propose_full
+expect_success "the pending state is reported" grep -q '^state=pending' "$work/propose/output"
+expect_success "a review submission does not close the pull request" absent "pr close" "$work/gh.log"
+expect_success "a review submission does not delete the branch" absent "git/refs/heads" "$work/gh.log"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
 
 expect_success "an archive outside the source repository waits for a review" \
   outcome review submit "https://example.com/releases/$release_name" test-developer

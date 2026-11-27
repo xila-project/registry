@@ -8,7 +8,9 @@ name: Submit package
 # Pull requests and merges done with GITHUB_TOKEN start no other workflow, so
 # this workflow runs the validation itself, records the `required` status on
 # the commit that it validated, and calls the publication workflow after an
-# automatic merge.
+# automatic merge. The job `propose` validates the final tree offline with
+# the pinned xila-package (digest-verified against tools/xila-package.sh)
+# before it records the status or merges (issue #24).
 
 on:
   workflow_call:
@@ -78,7 +80,9 @@ jobs:
   # Handles the untrusted archive: read-only token, no environment, and no
   # secret references (never reference `secrets.*` in this job; `secrets:
   # inherit` is forwarded only for `publish`'s `github-pages` environment).
-  # The xila-package cache is restored but never saved.
+  # The xila-package cache is restored but never saved, and the restored
+  # binary is verified against the digest pinned in tools/xila-package.sh
+  # before it runs (issue #24): a mismatch fails the job.
   prepare:
     name: Verify the archive and generate the entry
     runs-on: ubuntu-latest
@@ -99,6 +103,8 @@ jobs:
         with:
           path: .tools
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Setup | Install and verify xila-package"
+        run: bash tools/xila-package.sh
       - name: "Test | Validation rules"
         run: bash tools/test.sh
       - name: "Validate | Archive, entry and registry"
@@ -135,13 +141,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Never reads the archive: it commits only the generated data files.
+  # Never reads the archive: it commits only the generated data files, and
+  # validates the final tree offline before it records the status or merges
+  # (issue #24). The xila-package cache is restored but never saved; the
+  # restored binary is verified against the pinned digest first.
   propose:
     name: Open the pull request
     needs: prepare
     if: needs.prepare.outputs.outcome == 'automatic' || needs.prepare.outputs.outcome == 'review'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A cache miss builds xila-package here, which can take longer than the
+    # proposal itself.
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
@@ -155,6 +166,13 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.base }}
           persist-credentials: false
+      - name: "Setup | Restore xila-package"
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .tools
+          key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Setup | Install and verify xila-package"
+        run: bash tools/xila-package.sh
       - name: "Setup | Download submission"
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
