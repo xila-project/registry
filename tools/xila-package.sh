@@ -26,7 +26,7 @@ PACKAGE_MANAGER_REVISION=0fe7a782b6efc649cb70aa5fce7af316fc9161e7
 # RUST_VERSION for BUILD_TARGET below: static musl, no incremental
 # compilation, remapped Cargo home and build directory, so the digest does not
 # depend on the runner image.
-XILA_PACKAGE_SHA256=64ec778e593f05b9ed60a264c1297e6c9c0e942dc9f8c7f4cfafc4bf9b505de4
+XILA_PACKAGE_SHA256=dabba692c3e1ea0cd52c2297e34af75af6d9b3f4d0fa343abce80f227fff4611
 
 # One Rust version for every Xila repository; keep in sync with the
 # rust_version variable of xila-project/workspace mise/shared.toml. The CI jobs
