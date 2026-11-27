@@ -4,6 +4,8 @@ name: Package submission
 # form (label package-submission, which only the form or a maintainer sets).
 # The issue body is untrusted: tools/parse_submission_issue.sh reads it from
 # the event file, and no expression places it in a shell command.
+# An edit starts a run only when the issue body changed: title-only edits and
+# spam edits do not (issue #26).
 
 on:
   issues:
@@ -19,9 +21,13 @@ concurrency:
 jobs:
   parse:
     name: Read the submission form
+    # `github.event.changes.body` is present only when an edit changed the
+    # body, so an `edited` event without it (a title change, for example) is
+    # skipped.
     if: >-
       github.event.issue.state == 'open'
       && contains(github.event.issue.labels.*.name, 'package-submission')
+      && (github.event.action != 'edited' || github.event.changes.body != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
