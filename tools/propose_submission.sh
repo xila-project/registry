@@ -19,7 +19,9 @@
 #
 # This job never reads the archive. It accepts only the files that a
 # submission may add (the entry, the developer key of the publisher and an
-# io.github.<account> namespace file) and refuses anything else.
+# io.github.<account> namespace file), refuses anything else, and validates
+# the final tree offline with the pinned, digest-verified xila-package before
+# it records the status or merges (issue #24).
 set -euo pipefail
 
 submission="$(cd "${1:?usage: propose_submission.sh <submission-directory> <output-file>}" && pwd)"
@@ -75,6 +77,9 @@ title="feat(packages): add $identifier $version"
 body="$(mktemp)"
 trap 'rm -f "$body"' EXIT
 {
+  # Machine-readable outcome marker, read when a later submission supersedes
+  # this pull request (issue #25).
+  printf '<!-- package-submission-outcome: %s -->\n' "$outcome"
   if [[ "$outcome" == automatic ]]; then
     printf 'Adds `%s` %s from a package submission. It meets the conditions for an automatic merge (registry issue #21).\n\n' "$identifier" "$version"
   else
@@ -87,7 +92,7 @@ trap 'rm -f "$body"' EXIT
   printf -- '- Archive: `%s`\n' "$(jq -r '.archive.url' "$entry")"
   printf -- '- SHA-256: `%s`\n' "$(jq -r '.archive.sha256' "$entry")"
   printf -- '- Files: %s\n' "$(printf '`%s` ' "${files[@]}")"
-  printf '\nThe submission workflow downloaded the archive, verified its signature, generated the entry with `xila-package registry entry` and ran `tools/test.sh` and `tools/validate.sh` on this tree: %s\n' "${SUBMISSION_RUN_URL:-}"
+  printf '\nThe submission workflow downloaded the archive, verified its signature, generated the entry with `xila-package registry entry`, ran `tools/test.sh` and `tools/validate.sh` in `prepare` and `xila-package registry check` on the final tree in `propose`: %s\n' "${SUBMISSION_RUN_URL:-}"
   if [[ "$issue" != 0 ]]; then
     printf '\nCloses #%s\n' "$issue"
   fi
@@ -101,12 +106,57 @@ git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bo
   commit --quiet -m "$title" -m "$note"
 head="$(git rev-parse HEAD)"
 
+# Validate the final tree offline before it is pushed, recorded or merged
+# (issue #24): the same checks as tools/validate.sh, without the archives,
+# which this job never reads. tools/xila-package.sh refuses a binary whose
+# digest is not the pinned one.
+builder="$(bash tools/xila-package.sh)"
+"$builder" registry check .
+
 remote_branch="$(git ls-remote --heads origin "refs/heads/$branch")"
+branch_sha="${remote_branch%%$'\t'*}"
 if [[ -n "$remote_branch" ]]; then
-  pull_request="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json url --jq '.[0].url // ""')"
-  printf 'state=pending\npull-request=%s\n' "$pull_request" >> "$output"
-  echo "a submission branch already exists for $identifier $version: ${pull_request:-no open pull request}" >&2
-  exit 0
+  open_pull_requests="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open \
+    --json url,body,isCrossRepository,author,headRefOid --jq '.')"
+  pull_request="$(jq -r '[.[] | select(.isCrossRepository == false)] | .[0].url // ""' <<<"$open_pull_requests")"
+  # Only a pull request of this repository, opened by the workflow bot from
+  # the commit the branch points at, with the review marker as the exact
+  # first line of its body, counts as a review submission to supersede: a
+  # fork, a moved branch or an edited body cannot spoof it (#25).
+  review_pull_request="$(jq -r --arg branch_sha "$branch_sha" \
+    '[.[] | select(.isCrossRepository == false and .author.login == "app/github-actions" and .author.is_bot == true and .headRefOid == $branch_sha and ((.body // "") | split("\n")[0] | rtrimstr("\r")) == "<!-- package-submission-outcome: review -->")] | .[0].url // ""' \
+    <<<"$open_pull_requests")"
+  # An automatic submission is signed by the registered key and is a release
+  # asset of the source repository, so it supersedes such a pull request on
+  # the same branch (issue #25): delete the branch and close the pull request
+  # with a comment, then continue. Only the outcome "automatic" may do this.
+  if [[ "$outcome" == automatic && -n "$review_pull_request" ]]; then
+    if [[ "$dry_run" == true ]]; then
+      echo "dry run: would delete the branch $branch and close the review pull request $review_pull_request" >&2
+      remote_branch=""
+    else
+      : "${GH_TOKEN:?GH_TOKEN is not set}"
+      authorization="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+      # Delete the branch first, only while it still points at the commit read
+      # above: if the lease fails, another submission moved the branch and
+      # nothing is commented or closed.
+      git -c "http.https://github.com/.extraheader=$authorization" push --quiet \
+        --force-with-lease="refs/heads/$branch:$branch_sha" origin ":refs/heads/$branch"
+      gh pr comment "$review_pull_request" --repo "$GITHUB_REPOSITORY" --body \
+        "Superseded by an automatic submission of the same version: its archive is a signed release of the source repository by the registered developer key, so this review is no longer needed. The branch was deleted and this pull request is closed (registry issue #25)."
+      # Close only if the pull request is still open.
+      if [[ "$(gh pr view "$review_pull_request" --repo "$GITHUB_REPOSITORY" --json state --jq .state)" == OPEN ]]; then
+        gh pr close "$review_pull_request" --repo "$GITHUB_REPOSITORY"
+      fi
+      echo "superseded the review pull request $review_pull_request and deleted the branch $branch" >&2
+      remote_branch=""
+    fi
+  fi
+  if [[ -n "$remote_branch" ]]; then
+    printf 'state=pending\npull-request=%s\n' "$pull_request" >> "$output"
+    echo "a submission branch already exists for $identifier $version: ${pull_request:-no open pull request}" >&2
+    exit 0
+  fi
 fi
 
 if [[ "$dry_run" == true ]]; then

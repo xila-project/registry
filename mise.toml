@@ -1,0 +1,10 @@
+# Minimal mise configuration for the CI jobs that build xila-package
+# (tools/xila-package.sh): one pinned Rust version with the static musl
+# target, so the binary and its committed SHA-256 digest do not depend on the
+# runner image. Keep rust_version in sync with xila-project/workspace
+# mise/shared.toml.
+[vars]
+rust_version = "1.97.0"
+
+[tools]
+rust = { version = "{{ vars.rust_version }}", profile = "minimal", targets = ["x86_64-unknown-linux-musl"] }

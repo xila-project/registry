@@ -284,6 +284,7 @@ mkdir -p "$work/propose"
 propose() {
   : > "$work/propose/output"
   (cd "$submission" && env GITHUB_REPOSITORY=example/registry SUBMISSION_DRY_RUN=true \
+    XILA_PACKAGE="$builder" \
     bash tools/propose_submission.sh "$work/submission-work" "$work/propose/output")
 }
 propose_prepared() {
@@ -302,6 +303,135 @@ jq '.files += ["keys/developers/extra.json"]' "$work/submission-work/result.json
 cp "$work/result.json" "$work/submission-work/result.json"
 printf '{}' > "$work/submission-work/files/keys/developers/extra.json"
 expect_failure "a submission may only add its entry, key and namespace" "may not add keys/developers/extra.json" propose
+
+# The pinned xila-package binary is verified against its committed digest
+# before it runs (issue #24).
+expect_failure "a binary that is not the pinned one is refused" "digest mismatch" \
+  bash "$root/tools/xila-package.sh" --verify /bin/true
+ln -s /bin/true "$work/link"
+expect_failure "a symlink is not accepted as the binary" "not an executable regular file" \
+  bash "$root/tools/xila-package.sh" --verify "$work/link"
+expect_success "a local XILA_PACKAGE override is printed without verification" \
+  test "$(XILA_PACKAGE="$builder" bash "$root/tools/xila-package.sh")" = "$builder"
+
+# The propose job validates the final tree offline (issue #24): an entry that
+# does not sit at its own path is refused after the commit, before anything is
+# pushed, recorded or merged.
+outcome automatic submit "$release_url" test-developer
+tampered="$work/submission-work/files/packages/example/test/release/2.0.0.json"
+jq -c '.version = "9.9.9"' "$tampered" > "$work/changed.json" && cp "$work/changed.json" "$tampered"
+git -C "$submission" reset -q --hard && git -C "$submission" clean -q -fd
+expect_failure "the final tree is checked offline before it is proposed" 'must be at\|not canonical' propose
+git -C "$submission" reset -q --hard origin/main
+
+# A stub gh for the supersede tests (issue #25): it logs every call and answers
+# an open pull request on the submission branch, with the head commit read
+# from the local origin. GH_STUB_MODE=fork answers a cross-repository pull
+# request and GH_STUB_MODE=mismatch a pull request whose head moved; neither
+# must be superseded.
+mkdir -p "$work/bin"
+cat > "$work/bin/gh" <<'STUB'
+#!/usr/bin/env bash
+echo "gh $*" >> "${GH_STUB_LOG:?GH_STUB_LOG is not set}"
+case "$*" in
+  *"pr list"*)
+    branch=""
+    previous=""
+    for argument in "$@"; do
+      if [[ "$previous" == "--head" ]]; then branch="$argument"; fi
+      previous="$argument"
+    done
+    branch_sha="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+    cross=false login="app/github-actions" is_bot=true head_oid="$branch_sha"
+    case "${GH_STUB_MODE:-review}" in
+      fork) cross=true login="someone" is_bot=false head_oid="0000" ;;
+      mismatch) head_oid="deadbeef" ;;
+    esac
+    printf '[{"url":"https://example.test/pr/1","body":"<!-- package-submission-outcome: review -->\\nA maintainer must review it","isCrossRepository":%s,"author":{"login":"%s","is_bot":%s},"headRefOid":"%s"}]\n' \
+      "$cross" "$login" "$is_bot" "$head_oid"
+    ;;
+  *"pr view"*) printf 'OPEN\n' ;;
+  *) printf 'https://example.test/pr/2\n' ;;
+esac
+STUB
+chmod +x "$work/bin/gh"
+# A logging git wrapper, so the tests can assert on the pushes (the branch
+# delete uses --force-with-lease, not gh).
+cat > "$work/bin/git" <<'STUB'
+#!/usr/bin/env bash
+echo "git $*" >> "${GH_STUB_LOG:?GH_STUB_LOG is not set}"
+exec /usr/bin/git "$@"
+STUB
+chmod +x "$work/bin/git"
+propose_full() { # A real (non-dry) run against the local origin, with the stub gh.
+  : > "$work/propose/output"
+  : > "$work/gh.log"
+  (cd "$submission" && env GITHUB_REPOSITORY=example/registry SUBMISSION_DRY_RUN=false GH_TOKEN=dummy \
+    XILA_PACKAGE="$builder" PATH="$work/bin:$PATH" GH_STUB_LOG="$work/gh.log" GH_STUB_MODE="${GH_STUB_MODE:-review}" \
+    bash tools/propose_submission.sh "$work/submission-work" "$work/propose/output")
+}
+absent() { # <pattern> <file>: succeeds when the pattern is not in the file
+  ! grep -q -- "$1" "$2"
+}
+
+# An automatic submission finds the open review pull request on its branch,
+# closes it with a comment, deletes the branch and continues to the merge.
+# The branch first points at a diverging commit, so the delete must use the
+# lease on the commit that was read, and the push must replace the branch.
+outcome automatic submit "$release_url" test-developer
+empty_tree="$(git -C "$submission" hash-object -t tree /dev/null)"
+diverging="$(git -C "$submission" commit-tree "$empty_tree" -m diverging)"
+git -C "$submission" push -q --force origin "$diverging:refs/heads/submission/example.test.release/2.0.0"
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+expect_success "an automatic submission supersedes the review pull request and merges" propose_full
+expect_success "the superseded pull request is commented" \
+  grep -q "pr comment https://example.test/pr/1" "$work/gh.log"
+expect_success "the superseded pull request is closed" \
+  grep -q "pr close https://example.test/pr/1" "$work/gh.log"
+expect_success "the branch is deleted with a lease on the commit that was read" \
+  grep -q -- "--force-with-lease=refs/heads/submission/example.test.release/2.0.0:$diverging" "$work/gh.log"
+expect_success "the diverging branch head is replaced by the new submission" \
+  test "$(git -C "$submission" ls-remote --heads origin refs/heads/submission/example.test.release/2.0.0 | cut -f1)" = "$(git -C "$submission" rev-parse HEAD)"
+expect_success "the automatic submission merges after the supersede" \
+  grep -q '^state=merged' "$work/propose/output"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
+
+# A pull request from a fork on the same branch name is not superseded.
+outcome automatic submit "$release_url" test-developer
+git -C "$submission" push -q origin main:refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+GH_STUB_MODE=fork expect_success "an automatic submission does not supersede a fork pull request" propose_full
+expect_success "a fork pull request keeps the submission pending" \
+  grep -q '^state=pending' "$work/propose/output"
+expect_success "a fork pull request is not closed" absent "pr close" "$work/gh.log"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
+
+# A pull request whose head no longer matches the branch commit is not
+# superseded either.
+outcome automatic submit "$release_url" test-developer
+git -C "$submission" push -q origin main:refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+GH_STUB_MODE=mismatch expect_success "an automatic submission does not supersede a moved pull request head" propose_full
+expect_success "a moved head keeps the submission pending" \
+  grep -q '^state=pending' "$work/propose/output"
+expect_success "a moved head is not closed" absent "pr close" "$work/gh.log"
+expect_success "a moved head does not delete the branch" absent -- "--force-with-lease" "$work/gh.log"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
+
+# A submission for review never closes or deletes anything: it stays pending.
+outcome review submit "https://example.com/releases/$release_name" test-developer
+git -C "$submission" push -q origin main:refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+expect_success "a review submission stays pending on an existing branch" propose_full
+expect_success "the pending state is reported" grep -q '^state=pending' "$work/propose/output"
+expect_success "a review submission does not close the pull request" absent "pr close" "$work/gh.log"
+expect_success "a review submission does not delete the branch" absent -- "--force-with-lease" "$work/gh.log"
+expect_success "a review submission does not push a branch deletion" absent -- ":refs/heads/" "$work/gh.log"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
 
 expect_success "an archive outside the source repository waits for a review" \
   outcome review submit "https://example.com/releases/$release_name" test-developer

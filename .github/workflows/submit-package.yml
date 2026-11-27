@@ -8,7 +8,9 @@ name: Submit package
 # Pull requests and merges done with GITHUB_TOKEN start no other workflow, so
 # this workflow runs the validation itself, records the `required` status on
 # the commit that it validated, and calls the publication workflow after an
-# automatic merge.
+# automatic merge. The job `propose` validates the final tree offline with
+# the pinned xila-package (digest-verified against tools/xila-package.sh)
+# before it records the status or merges (issue #24).
 
 on:
   workflow_call:
@@ -78,10 +80,13 @@ jobs:
   # Handles the untrusted archive: read-only token, no environment, and no
   # secret references (never reference `secrets.*` in this job; `secrets:
   # inherit` is forwarded only for `publish`'s `github-pages` environment).
-  # The xila-package cache is restored but never saved.
+  # Only the final xila-package binary is cached, and it is restored but
+  # never saved. It is verified against the digest pinned in
+  # tools/xila-package.sh before it runs (issue #24): a mismatch fails the
+  # job. The build itself never writes into the cached directory.
   prepare:
     name: Verify the archive and generate the entry
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -89,16 +94,29 @@ jobs:
       outcome: ${{ steps.submit.outputs.outcome }}
       base: ${{ steps.submit.outputs.base }}
       artifact: ${{ steps.submit.outputs.artifact }}
+      identifier: ${{ steps.submit.outputs.identifier }}
+      version: ${{ steps.submit.outputs.version }}
     steps:
       - name: "Setup | Checkout registry"
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: "Setup | Restore xila-package"
+        id: xila-package-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: .tools
+          # Only the final binary is cached; the build never writes here.
+          # Restored before mise so a planted mise shim cache cannot run first.
+          path: .tools/xila-package
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Setup | Install pinned Rust"
+        if: steps.xila-package-cache.outputs.cache-hit != 'true'
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          # Never cache mise itself: its shims go first on PATH unverified.
+          cache: false
+      - name: "Setup | Install and verify xila-package"
+        run: bash tools/xila-package.sh
       - name: "Test | Validation rules"
         run: bash tools/test.sh
       - name: "Validate | Archive, entry and registry"
@@ -119,7 +137,11 @@ jobs:
           echo "artifact=submission-$(cat /proc/sys/kernel/random/uuid)" >> "$GITHUB_OUTPUT"
           bash tools/submit.sh "$work" 2> >(tee "$work/submit.log" >&2) || true
           if [[ -f "$work/result.json" ]]; then
-            echo "outcome=$(jq -r '.outcome' "$work/result.json")" >> "$GITHUB_OUTPUT"
+            {
+              echo "outcome=$(jq -r '.outcome' "$work/result.json")"
+              echo "identifier=$(jq -r '.identifier // ""' "$work/result.json")"
+              echo "version=$(jq -r '.version // ""' "$work/result.json")"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "outcome=error" >> "$GITHUB_OUTPUT"
           fi
@@ -135,13 +157,25 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  # Never reads the archive: it commits only the generated data files.
+  # Never reads the archive: it commits only the generated data files, and
+  # validates the final tree offline before it records the status or merges
+  # (issue #24). Only the final xila-package binary is cached, it is restored
+  # but never saved, and it is verified against the pinned digest first.
   propose:
     name: Open the pull request
     needs: prepare
     if: needs.prepare.outputs.outcome == 'automatic' || needs.prepare.outputs.outcome == 'review'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # One propose run at a time per submission branch: two automatic
+    # submissions of the same version must not race on the branch, while
+    # submissions of different versions can queue in parallel; a newer run
+    # waits instead of cancelling. The branch delete lease stays as defense.
+    concurrency:
+      group: package-submission-propose-${{ needs.prepare.outputs.identifier }}-${{ needs.prepare.outputs.version }}
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    # A cache miss builds xila-package here, which can take longer than the
+    # proposal itself.
+    timeout-minutes: 30
     permissions:
       contents: write
       pull-requests: write
@@ -155,6 +189,22 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.base }}
           persist-credentials: false
+      - name: "Setup | Restore xila-package"
+        id: xila-package-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          # Only the final binary is cached; the build never writes here.
+          # Restored before mise so a planted mise shim cache cannot run first.
+          path: .tools/xila-package
+          key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Setup | Install pinned Rust"
+        if: steps.xila-package-cache.outputs.cache-hit != 'true'
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          # Never cache mise itself: its shims go first on PATH unverified.
+          cache: false
+      - name: "Setup | Install and verify xila-package"
+        run: bash tools/xila-package.sh
       - name: "Setup | Download submission"
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -186,7 +236,7 @@ jobs:
     name: Report the result
     needs: [prepare, propose, publish]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read
