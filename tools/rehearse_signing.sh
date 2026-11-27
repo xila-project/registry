@@ -22,6 +22,9 @@ for directory in namespaces packages; do
     cp -R "$root/$directory" "$work/registry/"
   fi
 done
+if [[ -f "$root/replacements.json" ]]; then
+  cp "$root/replacements.json" "$work/registry/"
+fi
 mkdir -p "$work/registry/packages"
 
 "$builder" key generate "$work/root.seed" "$work/root.pub" >/dev/null

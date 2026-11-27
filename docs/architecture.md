@@ -22,7 +22,7 @@ An entry pins its archive by SHA-256 and size, so it transitively pins the signe
 1. A developer releases a signed, immutable `.xpk` and submits its URL with the issue form, which generates the entry (and, the first time, the developer key file) and opens a pull request. A manual pull request with a generated entry is also possible.
 2. Validation checks keys, placement, namespace authorization and each archive. A maintainer reviews provenance, content and permissions, except for a new version of a registered publisher released in the source repository that the package names, which is merged automatically (see the [README](../README.md#publishing-a-version)).
 3. `main` is published unchanged to GitHub Pages. Archives are fetched from their release URLs; because entries pin their hash, any mirror or CDN can serve them without being trusted.
-4. A client resolves `xila.clock` to `packages/xila/clock/<version>.json`, downloads the archive, and verifies it end to end before installing.
+4. A client resolves `dev.xila.clock` to `packages/dev/xila/clock/<version>.json`, downloads the archive, and verifies it end to end before installing.
 
 There is deliberately **no mandatory search** endpoint or dynamic server; a search index can be added later without changing lookup.
 

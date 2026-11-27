@@ -19,14 +19,14 @@ set -euo pipefail
 
 # package_manager revision providing `xila-package registry check | sign | verify-signed`,
 # registry entry format 2 (`xila_version`), developer key `kinds` (Wasm or
-# native authorization) and namespace files for reverse-DNS identifiers.
-PACKAGE_MANAGER_REVISION=75b7596768a3470d17f2104b2ca4255971d6e1ba
+# native authorization), namespace files and signed replacement pointers.
+PACKAGE_MANAGER_REVISION=0fe7a782b6efc649cb70aa5fce7af316fc9161e7
 
 # SHA-256 of the xila-package binary built from PACKAGE_MANAGER_REVISION with
 # RUST_VERSION for BUILD_TARGET below: static musl, no incremental
 # compilation, remapped Cargo home and build directory, so the digest does not
 # depend on the runner image.
-XILA_PACKAGE_SHA256=b67cdfec1872a87c64dd4f4cf80e02dff1c18056f14ef7d8b02746d3128d3da9
+XILA_PACKAGE_SHA256=64ec778e593f05b9ed60a264c1297e6c9c0e942dc9f8c7f4cfafc4bf9b505de4
 
 # One Rust version for every Xila repository; keep in sync with the
 # rust_version variable of xila-project/workspace mise/shared.toml. The CI jobs

@@ -1,0 +1,42 @@
+[
+  {
+    "name": "xila.calculator",
+    "replaced_by": "dev.xila.calculator"
+  },
+  {
+    "name": "xila.clock",
+    "replaced_by": "dev.xila.clock"
+  },
+  {
+    "name": "xila.dashboard",
+    "replaced_by": "dev.xila.dashboard"
+  },
+  {
+    "name": "xila.digits",
+    "replaced_by": "dev.xila.digits"
+  },
+  {
+    "name": "xila.home-assistant",
+    "replaced_by": "dev.xila.home-assistant"
+  },
+  {
+    "name": "xila.pixel-painter",
+    "replaced_by": "dev.xila.pixel-painter"
+  },
+  {
+    "name": "xila.shortcuts",
+    "replaced_by": "dev.xila.shortcuts"
+  },
+  {
+    "name": "xila.synth",
+    "replaced_by": "dev.xila.synth"
+  },
+  {
+    "name": "xila.text-editor",
+    "replaced_by": "dev.xila.text-editor"
+  },
+  {
+    "name": "xila.weather",
+    "replaced_by": "dev.xila.weather"
+  }
+]
