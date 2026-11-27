@@ -114,26 +114,36 @@ builder="$(bash tools/xila-package.sh)"
 "$builder" registry check .
 
 remote_branch="$(git ls-remote --heads origin "refs/heads/$branch")"
+branch_sha="${remote_branch%%$'\t'*}"
 if [[ -n "$remote_branch" ]]; then
-  pr_json="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open --json url,body \
-    --jq 'if length > 0 then .[0] else {} end')"
-  pull_request="$(jq -r '.url // ""' <<<"$pr_json")"
-  pr_body="$(jq -r '.body // ""' <<<"$pr_json")"
+  open_pull_requests="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open \
+    --json url,body,isCrossRepository,author,headRefOid --jq '.')"
+  pull_request="$(jq -r '.[0].url // ""' <<<"$open_pull_requests")"
+  # Only a pull request of this repository, opened by the workflow bot with
+  # the review marker as the exact first line of its body, counts as a review
+  # submission to supersede: a fork or an edited body cannot spoof it (#25).
+  review_pull_request="$(jq -r \
+    '[.[] | select(.isCrossRepository == false and .author.login == "app/github-actions" and .author.is_bot == true and ((.body // "") | split("\n")[0]) == "<!-- package-submission-outcome: review -->")] | .[0].url // ""' \
+    <<<"$open_pull_requests")"
   # An automatic submission is signed by the registered key and is a release
-  # asset of the source repository, so it supersedes a pull request that was
-  # opened for review on the same branch (issue #25): close it with a comment,
-  # delete the branch and continue. Only the outcome "automatic" may do this.
-  if [[ "$outcome" == automatic && "$pr_body" == *"package-submission-outcome: review"* ]]; then
+  # asset of the source repository, so it supersedes such a pull request on
+  # the same branch (issue #25): close it with a comment, delete the branch
+  # and continue. Only the outcome "automatic" may do this.
+  if [[ "$outcome" == automatic && -n "$review_pull_request" ]]; then
     if [[ "$dry_run" == true ]]; then
-      echo "dry run: would close the review pull request ${pull_request:-$branch} and delete the branch $branch" >&2
+      echo "dry run: would close the review pull request $review_pull_request and delete the branch $branch" >&2
       remote_branch=""
     else
       : "${GH_TOKEN:?GH_TOKEN is not set}"
-      gh pr comment "$pull_request" --repo "$GITHUB_REPOSITORY" --body \
+      authorization="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+      gh pr comment "$review_pull_request" --repo "$GITHUB_REPOSITORY" --body \
         "Superseded by an automatic submission of the same version: its archive is a signed release of the source repository by the registered developer key, so this review is no longer needed. Closing this pull request and deleting the branch (registry issue #25)."
-      gh pr close "$pull_request" --repo "$GITHUB_REPOSITORY"
-      gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$branch"
-      echo "superseded the review pull request $pull_request and deleted the branch $branch" >&2
+      gh pr close "$review_pull_request" --repo "$GITHUB_REPOSITORY"
+      # Delete the branch only while it still points at the commit read above,
+      # so a concurrent submission cannot make us delete a newer branch.
+      git -c "http.https://github.com/.extraheader=$authorization" push --quiet \
+        --force-with-lease="refs/heads/$branch:$branch_sha" origin ":refs/heads/$branch"
+      echo "superseded the review pull request $review_pull_request and deleted the branch $branch" >&2
       remote_branch=""
     fi
   fi

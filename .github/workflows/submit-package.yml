@@ -80,12 +80,13 @@ jobs:
   # Handles the untrusted archive: read-only token, no environment, and no
   # secret references (never reference `secrets.*` in this job; `secrets:
   # inherit` is forwarded only for `publish`'s `github-pages` environment).
-  # The xila-package cache is restored but never saved, and the restored
-  # binary is verified against the digest pinned in tools/xila-package.sh
-  # before it runs (issue #24): a mismatch fails the job.
+  # Only the final xila-package binary is cached, and it is restored but
+  # never saved. It is verified against the digest pinned in
+  # tools/xila-package.sh before it runs (issue #24): a mismatch fails the
+  # job. The build itself never writes into the cached directory.
   prepare:
     name: Verify the archive and generate the entry
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
       contents: read
@@ -98,10 +99,13 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
+      - name: "Setup | Install pinned Rust"
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - name: "Setup | Restore xila-package"
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: .tools
+          # Only the final binary is cached; the build never writes here.
+          path: .tools/xila-package
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
       - name: "Setup | Install and verify xila-package"
         run: bash tools/xila-package.sh
@@ -143,13 +147,18 @@ jobs:
 
   # Never reads the archive: it commits only the generated data files, and
   # validates the final tree offline before it records the status or merges
-  # (issue #24). The xila-package cache is restored but never saved; the
-  # restored binary is verified against the pinned digest first.
+  # (issue #24). Only the final xila-package binary is cached, it is restored
+  # but never saved, and it is verified against the pinned digest first.
   propose:
     name: Open the pull request
     needs: prepare
     if: needs.prepare.outputs.outcome == 'automatic' || needs.prepare.outputs.outcome == 'review'
-    runs-on: ubuntu-latest
+    # One propose run at a time: two automatic submissions of the same version
+    # must not race on the branch; a newer run waits instead of cancelling.
+    concurrency:
+      group: package-submission-propose
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
     # A cache miss builds xila-package here, which can take longer than the
     # proposal itself.
     timeout-minutes: 30
@@ -166,10 +175,13 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.base }}
           persist-credentials: false
+      - name: "Setup | Install pinned Rust"
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - name: "Setup | Restore xila-package"
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: .tools
+          # Only the final binary is cached; the build never writes here.
+          path: .tools/xila-package
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
       - name: "Setup | Install and verify xila-package"
         run: bash tools/xila-package.sh
@@ -204,7 +216,7 @@ jobs:
     name: Report the result
     needs: [prepare, propose, publish]
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: read

@@ -12,7 +12,7 @@ permissions:
 jobs:
   validate:
     name: Validate manifests and generate a static preview
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: "Setup | Checkout registry"
@@ -20,11 +20,16 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: "Setup | Install pinned Rust"
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       - name: "Setup | Cache xila-package"
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
-          path: .tools
+          # Only the final binary is cached; the build never writes here.
+          path: .tools/xila-package
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Setup | Install and verify xila-package"
+        run: bash tools/xila-package.sh
       - name: "Test | Validation rules"
         run: bash tools/test.sh
       - name: "Validate | Keys, entries and archives"
@@ -47,7 +52,7 @@ jobs:
   required:
     if: always()
     needs: [validate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: "Gate | Verify mandatory checks"
