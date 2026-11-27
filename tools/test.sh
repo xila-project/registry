@@ -309,7 +309,7 @@ expect_failure "a submission may only add its entry, key and namespace" "may not
 expect_failure "a binary that is not the pinned one is refused" "digest mismatch" \
   bash "$root/tools/xila-package.sh" --verify /bin/true
 ln -s /bin/true "$work/link"
-expect_failure "a symlink is not accepted as the binary" "not a regular file" \
+expect_failure "a symlink is not accepted as the binary" "not an executable regular file" \
   bash "$root/tools/xila-package.sh" --verify "$work/link"
 expect_success "a local XILA_PACKAGE override is printed without verification" \
   test "$(XILA_PACKAGE="$builder" bash "$root/tools/xila-package.sh")" = "$builder"
@@ -325,20 +325,32 @@ expect_failure "the final tree is checked offline before it is proposed" 'must b
 git -C "$submission" reset -q --hard origin/main
 
 # A stub gh for the supersede tests (issue #25): it logs every call and answers
-# an open pull request on the submission branch. GH_STUB_MODE=fork answers a
-# cross-repository pull request instead, which must not be superseded.
+# an open pull request on the submission branch, with the head commit read
+# from the local origin. GH_STUB_MODE=fork answers a cross-repository pull
+# request and GH_STUB_MODE=mismatch a pull request whose head moved; neither
+# must be superseded.
 mkdir -p "$work/bin"
 cat > "$work/bin/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "gh $*" >> "${GH_STUB_LOG:?GH_STUB_LOG is not set}"
 case "$*" in
   *"pr list"*)
-    if [[ "${GH_STUB_MODE:-review}" == fork ]]; then
-      printf '[{"url":"https://example.test/pr/9","body":"<!-- package-submission-outcome: review -->\\nopened from a fork","isCrossRepository":true,"author":{"login":"someone","is_bot":false},"headRefOid":"0000"}]\n'
-    else
-      printf '[{"url":"https://example.test/pr/1","body":"<!-- package-submission-outcome: review -->\\nA maintainer must review it","isCrossRepository":false,"author":{"login":"app/github-actions","is_bot":true},"headRefOid":"abc123"}]\n'
-    fi ;;
-  *"pr view"*) printf 'MERGED\n' ;;
+    branch=""
+    previous=""
+    for argument in "$@"; do
+      if [[ "$previous" == "--head" ]]; then branch="$argument"; fi
+      previous="$argument"
+    done
+    branch_sha="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+    cross=false login="app/github-actions" is_bot=true head_oid="$branch_sha"
+    case "${GH_STUB_MODE:-review}" in
+      fork) cross=true login="someone" is_bot=false head_oid="0000" ;;
+      mismatch) head_oid="deadbeef" ;;
+    esac
+    printf '[{"url":"https://example.test/pr/1","body":"<!-- package-submission-outcome: review -->\\nA maintainer must review it","isCrossRepository":%s,"author":{"login":"%s","is_bot":%s},"headRefOid":"%s"}]\n' \
+      "$cross" "$login" "$is_bot" "$head_oid"
+    ;;
+  *"pr view"*) printf 'OPEN\n' ;;
   *) printf 'https://example.test/pr/2\n' ;;
 esac
 STUB
@@ -393,6 +405,19 @@ GH_STUB_MODE=fork expect_success "an automatic submission does not supersede a f
 expect_success "a fork pull request keeps the submission pending" \
   grep -q '^state=pending' "$work/propose/output"
 expect_success "a fork pull request is not closed" absent "pr close" "$work/gh.log"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
+
+# A pull request whose head no longer matches the branch commit is not
+# superseded either.
+outcome automatic submit "$release_url" test-developer
+git -C "$submission" push -q origin main:refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+GH_STUB_MODE=mismatch expect_success "an automatic submission does not supersede a moved pull request head" propose_full
+expect_success "a moved head keeps the submission pending" \
+  grep -q '^state=pending' "$work/propose/output"
+expect_success "a moved head is not closed" absent "pr close" "$work/gh.log"
+expect_success "a moved head does not delete the branch" absent -- "--force-with-lease" "$work/gh.log"
 git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
 git -C "$submission" reset -q --hard origin/main
 

@@ -29,7 +29,7 @@ PACKAGE_MANAGER_REVISION=75b7596768a3470d17f2104b2ca4255971d6e1ba
 XILA_PACKAGE_SHA256=b67cdfec1872a87c64dd4f4cf80e02dff1c18056f14ef7d8b02746d3128d3da9
 
 # One Rust version for every Xila repository; keep in sync with the
-# rust_version var of xila-project/workspace mise/shared.toml. The CI jobs
+# rust_version variable of xila-project/workspace mise/shared.toml. The CI jobs
 # install it with mise (mise.toml) before this script runs.
 RUST_VERSION=1.97.0
 
@@ -37,10 +37,10 @@ RUST_VERSION=1.97.0
 # binary runs on every Linux runner and its bytes do not depend on the image.
 BUILD_TARGET=x86_64-unknown-linux-musl
 
-verify() { # <binary>: refuse anything but the pinned regular file
+verify() { # <binary>: refuse anything but the pinned executable regular file
   local file="$1" actual
-  if [[ ! -f "$file" || -L "$file" ]]; then
-    echo "xila-package is not a regular file: $file" >&2
+  if [[ ! -f "$file" || -L "$file" || ! -x "$file" ]]; then
+    echo "xila-package is not an executable regular file: $file" >&2
     exit 1
   fi
   actual="$(sha256sum -- "$file" | cut -d ' ' -f 1)"
@@ -65,20 +65,26 @@ fi
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tools="$root/.tools"
 binary="$tools/xila-package"
-if [[ ! -x "$binary" ]]; then
+# Build only when the path does not exist at all: a planted non-executable
+# file or symlink skips the build and fails in verify below.
+if [[ ! -e "$binary" && ! -L "$binary" ]]; then
   cargo_version="$(cargo --version | cut -d ' ' -f 2)"
   if [[ "$cargo_version" != "$RUST_VERSION" ]]; then
     echo "xila-package must be built with Rust $RUST_VERSION, but cargo reports $cargo_version; run 'mise install' first" >&2
     exit 1
   fi
   if command -v rustup >/dev/null 2>&1; then
-    rustup target add "$BUILD_TARGET" >&2
+    if ! rustup target list --installed | grep -qx "$BUILD_TARGET"; then
+      rustup target add "$BUILD_TARGET" >&2
+    fi
   fi
   # Remove any residue of a cache entry, then build outside the cached
   # directory, in a fresh temporary directory that is removed on exit.
   rm -rf "$tools"
-  build="$(mktemp -d)"
+  build="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/xila-package.XXXXXX")"
   trap 'rm -rf "$build"' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   cargo_home="${CARGO_HOME:-$HOME/.cargo}"
   CARGO_INCREMENTAL=0 \
   CARGO_TARGET_DIR="$build/target" \

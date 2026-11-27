@@ -20,14 +20,20 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: "Setup | Install pinned Rust"
-        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
-      - name: "Setup | Cache xila-package"
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - name: "Setup | Restore xila-package"
+        id: xila-package-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           # Only the final binary is cached; the build never writes here.
+          # Restored before mise so a planted mise shim cache cannot run first.
           path: .tools/xila-package
           key: xila-package-${{ hashFiles('tools/xila-package.sh') }}
+      - name: "Setup | Install pinned Rust"
+        if: steps.xila-package-cache.outputs.cache-hit != 'true'
+        uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+        with:
+          # Never cache mise itself: its shims go first on PATH unverified.
+          cache: false
       - name: "Setup | Install and verify xila-package"
         run: bash tools/xila-package.sh
       - name: "Test | Validation rules"

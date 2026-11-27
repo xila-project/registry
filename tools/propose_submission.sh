@@ -118,31 +118,36 @@ branch_sha="${remote_branch%%$'\t'*}"
 if [[ -n "$remote_branch" ]]; then
   open_pull_requests="$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --state open \
     --json url,body,isCrossRepository,author,headRefOid --jq '.')"
-  pull_request="$(jq -r '.[0].url // ""' <<<"$open_pull_requests")"
-  # Only a pull request of this repository, opened by the workflow bot with
-  # the review marker as the exact first line of its body, counts as a review
-  # submission to supersede: a fork or an edited body cannot spoof it (#25).
-  review_pull_request="$(jq -r \
-    '[.[] | select(.isCrossRepository == false and .author.login == "app/github-actions" and .author.is_bot == true and ((.body // "") | split("\n")[0]) == "<!-- package-submission-outcome: review -->")] | .[0].url // ""' \
+  pull_request="$(jq -r '[.[] | select(.isCrossRepository == false)] | .[0].url // ""' <<<"$open_pull_requests")"
+  # Only a pull request of this repository, opened by the workflow bot from
+  # the commit the branch points at, with the review marker as the exact
+  # first line of its body, counts as a review submission to supersede: a
+  # fork, a moved branch or an edited body cannot spoof it (#25).
+  review_pull_request="$(jq -r --arg branch_sha "$branch_sha" \
+    '[.[] | select(.isCrossRepository == false and .author.login == "app/github-actions" and .author.is_bot == true and .headRefOid == $branch_sha and ((.body // "") | split("\n")[0] | rtrimstr("\r")) == "<!-- package-submission-outcome: review -->")] | .[0].url // ""' \
     <<<"$open_pull_requests")"
   # An automatic submission is signed by the registered key and is a release
   # asset of the source repository, so it supersedes such a pull request on
-  # the same branch (issue #25): close it with a comment, delete the branch
-  # and continue. Only the outcome "automatic" may do this.
+  # the same branch (issue #25): delete the branch and close the pull request
+  # with a comment, then continue. Only the outcome "automatic" may do this.
   if [[ "$outcome" == automatic && -n "$review_pull_request" ]]; then
     if [[ "$dry_run" == true ]]; then
-      echo "dry run: would close the review pull request $review_pull_request and delete the branch $branch" >&2
+      echo "dry run: would delete the branch $branch and close the review pull request $review_pull_request" >&2
       remote_branch=""
     else
       : "${GH_TOKEN:?GH_TOKEN is not set}"
       authorization="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
-      gh pr comment "$review_pull_request" --repo "$GITHUB_REPOSITORY" --body \
-        "Superseded by an automatic submission of the same version: its archive is a signed release of the source repository by the registered developer key, so this review is no longer needed. Closing this pull request and deleting the branch (registry issue #25)."
-      gh pr close "$review_pull_request" --repo "$GITHUB_REPOSITORY"
-      # Delete the branch only while it still points at the commit read above,
-      # so a concurrent submission cannot make us delete a newer branch.
+      # Delete the branch first, only while it still points at the commit read
+      # above: if the lease fails, another submission moved the branch and
+      # nothing is commented or closed.
       git -c "http.https://github.com/.extraheader=$authorization" push --quiet \
         --force-with-lease="refs/heads/$branch:$branch_sha" origin ":refs/heads/$branch"
+      gh pr comment "$review_pull_request" --repo "$GITHUB_REPOSITORY" --body \
+        "Superseded by an automatic submission of the same version: its archive is a signed release of the source repository by the registered developer key, so this review is no longer needed. The branch was deleted and this pull request is closed (registry issue #25)."
+      # Close only if the pull request is still open.
+      if [[ "$(gh pr view "$review_pull_request" --repo "$GITHUB_REPOSITORY" --json state --jq .state)" == OPEN ]]; then
+        gh pr close "$review_pull_request" --repo "$GITHUB_REPOSITORY"
+      fi
       echo "superseded the review pull request $review_pull_request and deleted the branch $branch" >&2
       remote_branch=""
     fi
