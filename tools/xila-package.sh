@@ -81,7 +81,8 @@ if [[ ! -e "$binary" && ! -L "$binary" ]]; then
   # Remove any residue of a cache entry, then build outside the cached
   # directory, in a fresh temporary directory that is removed on exit.
   rm -rf "$tools"
-  build="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/xila-package.XXXXXX")"
+  temporary_directory="${RUNNER_TEMP:-${TMPDIR:-/tmp}}"
+  build="$(mktemp -d "${temporary_directory%/}/xila-package.XXXXXX")"
   trap 'rm -rf "$build"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM

@@ -191,7 +191,7 @@ fi
 identifier="$(jq -r '.name' "$work/entry.json")"
 version="$(jq -r '.version' "$work/entry.json")"
 # xila-package enforces the schemas; check again before building a path.
-[[ "$identifier" =~ ^[a-z0-9_-]+(\.[a-z0-9_-]+)+$ && ${#identifier} -le 96 ]] || { identifier=""; refuse "unexpected package identifier"; }
+[[ "$identifier" =~ ^[a-z0-9_-]+(\.[a-z0-9_-]+)+$ && ${#identifier} -le 96 ]] || { identifier=""; version=""; refuse "unexpected package identifier"; }
 [[ "$version" =~ ^[A-Za-z0-9+-]+(\.[A-Za-z0-9+-]+)*$ && ${#version} -le 64 ]] || { version=""; refuse "unexpected package version"; }
 entry="packages/${identifier//.//}/$version.json"
 if git cat-file -e "HEAD:$entry" 2>/dev/null; then

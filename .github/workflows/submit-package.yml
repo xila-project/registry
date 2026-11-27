@@ -170,7 +170,7 @@ jobs:
     # submissions of different versions can queue in parallel; a newer run
     # waits instead of cancelling. The branch delete lease stays as defense.
     concurrency:
-      group: package-submission-propose-${{ needs.prepare.outputs.identifier }}-${{ needs.prepare.outputs.version }}
+      group: package-submission-propose-${{ needs.prepare.outputs.identifier }}/${{ needs.prepare.outputs.version }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     # A cache miss builds xila-package here, which can take longer than the

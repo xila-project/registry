@@ -82,6 +82,13 @@ The rename of the publisher `xila-project` to `xila` (#19) was a one-time except
 
 Pull requests and merges made with the workflow token start no other workflow. Therefore **Submit package** validates the exact pull request tree itself, records `required` on it, and calls the publication. The `xila-package` binary that runs in `validate`, `prepare`, `propose` and the publication is verified against the SHA-256 digest committed in `tools/xila-package.sh`, so a cache entry planted by a compromised run fails the job before the binary executes (#24). The jobs pin the runner image (`ubuntu-24.04`) and install the pinned Rust with mise (`mise.toml`) before building, and the build is a static musl binary with remapped paths, so the digest does not drift with the runner image. The issue text and the archive are untrusted: they reach the scripts only through environment variables and files, nothing from the archive is built or executed, and the signing seed is available only to the publication job. The design and the security analysis are in [issue #21](https://github.com/xila-project/registry/issues/21). The repository seed is the `XILA_REGISTRY_SIGNING_SEED_B64` secret of the `github-pages` environment, available only to the signing job; it will move to OpenBao, with new keys, once that is available. Neither workflow builds or executes application code. Run `bash tools/validate.sh` locally (needs `mise install` for the pinned Rust, plus `curl`, `git` and `jq`; set `XILA_PACKAGE` to reuse an existing binary).
 
+### Update the xila-package digest
+
+1. Change `PACKAGE_MANAGER_REVISION` in `tools/xila-package.sh` in a fresh checkout on a trusted x86-64 Linux machine.
+2. Run `mise install` and `env -u XILA_PACKAGE mise exec -- bash tools/xila-package.sh`. The script builds the static musl binary with the pinned toolchain and reports a digest mismatch if the bytes changed.
+3. Run `sha256sum .tools/xila-package`. Set `XILA_PACKAGE_SHA256` in `tools/xila-package.sh` to the printed digest.
+4. Run `bash tools/xila-package.sh --verify .tools/xila-package`. Commit the revision and digest in the same commit.
+
 ## Root key
 
 The root key is kept offline and only signs `root.json`:
