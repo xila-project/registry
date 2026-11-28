@@ -85,7 +85,22 @@ Pull requests and merges made with the workflow token start no other workflow. T
 ### Update the xila-package digest
 
 1. Change `PACKAGE_MANAGER_REVISION` in `tools/xila-package.sh` in a fresh checkout on a trusted x86-64 Linux machine.
-2. Run `mise install` and `env -u XILA_PACKAGE mise exec -- bash tools/xila-package.sh`. The script builds the static musl binary with the pinned toolchain and reports a digest mismatch if the bytes changed.
+2. Build with a fresh minimal Rust toolchain. An installed `rust-src` component changes the digest. These commands use a separate Rustup directory and remove it after the build. The script leaves the static musl binary in `.tools/` and reports a digest mismatch if the bytes changed.
+
+   ```sh
+   (
+     set -eu
+     cache_directory="${XDG_CACHE_HOME:-$HOME/.cache}"
+     mkdir -p "$cache_directory"
+     RUSTUP_HOME="$(mktemp -d "$cache_directory/xila-registry-rustup.XXXXXX")"
+     export RUSTUP_HOME
+     trap 'rm -rf "$RUSTUP_HOME"' EXIT
+     rust_version="$(sed -n 's/^RUST_VERSION=//p' tools/xila-package.sh)"
+     rustup toolchain install "$rust_version" --profile minimal --target x86_64-unknown-linux-musl
+     env -u XILA_PACKAGE -u RUSTC rustup run "$rust_version" bash tools/xila-package.sh
+   )
+   ```
+
 3. Run `sha256sum .tools/xila-package`. Set `XILA_PACKAGE_SHA256` in `tools/xila-package.sh` to the printed digest.
 4. Run `bash tools/xila-package.sh --verify .tools/xila-package`. Commit the revision and digest in the same commit.
 

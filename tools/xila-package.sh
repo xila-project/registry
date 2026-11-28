@@ -23,9 +23,8 @@ set -euo pipefail
 PACKAGE_MANAGER_REVISION=75b7596768a3470d17f2104b2ca4255971d6e1ba
 
 # SHA-256 of the xila-package binary built from PACKAGE_MANAGER_REVISION with
-# RUST_VERSION for BUILD_TARGET below: static musl, no incremental
-# compilation, remapped Cargo home and build directory, so the digest does not
-# depend on the runner image.
+# RUST_VERSION for BUILD_TARGET below: static musl, no rust-src, no incremental
+# compilation, and remapped Cargo home and build directory.
 XILA_PACKAGE_SHA256=b67cdfec1872a87c64dd4f4cf80e02dff1c18056f14ef7d8b02746d3128d3da9
 
 # One Rust version for every Xila repository; keep in sync with the
@@ -71,6 +70,12 @@ if [[ ! -e "$binary" && ! -L "$binary" ]]; then
   cargo_version="$(cargo --version | cut -d ' ' -f 2)"
   if [[ "$cargo_version" != "$RUST_VERSION" ]]; then
     echo "xila-package must be built with Rust $RUST_VERSION, but cargo reports $cargo_version; run 'mise install' first" >&2
+    exit 1
+  fi
+  rust_sysroot="$("${RUSTC:-rustc}" --print sysroot)"
+  # Rust can embed local standard library source paths when rust-src is present.
+  if [[ -d "$rust_sysroot/lib/rustlib/src/rust/library" ]]; then
+    echo "xila-package cannot be built with rust-src installed because it changes the digest. Use a separate minimal Rust $RUST_VERSION toolchain as described in README.md." >&2
     exit 1
   fi
   if command -v rustup >/dev/null 2>&1; then
