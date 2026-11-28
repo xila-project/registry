@@ -30,6 +30,13 @@ For example, `xila.pixel-painter` 0.2.1 is `packages/xila/pixel-painter/0.2.1.js
 - A **developer key** (`id`, `author`, Ed25519 `public_key`, optional legacy `namespaces`, `kinds`) signs package manifests and may only publish identifiers that a namespace file grants it (or, through the legacy rule, `xila.<name>`) and whose kind is in its `kinds`. A package is **Wasm** when its target starts with `wasm32-` or `wasm64-` and **native** otherwise. Native code on a microcontroller without a memory protection unit runs fully trusted, so `native` is a separate, explicit grant that a maintainer reviews; a key without `kinds` may publish Wasm only.
 - A **registry entry** pins one released archive by HTTPS URL, SHA-256 and size, names its `publisher`, and copies identity, compatibility, capabilities, display name and metadata from the archive's signed manifest. It is **generated from the archive, never written by hand**.
 
+## Official domain ownership
+
+The website serves the public proof for `dev.xila` at
+`https://www.xila.dev/.well-known/xila-namespace.txt`. Registry validation
+checks the proof at the canonical website host. The per-package signing design
+will define how first publication uses the proof.
+
 ## Publishing a version
 
 1. Release a signed `.xpk` in your project (for example with the [reusable packaging workflow](https://github.com/xila-project/package_manager/blob/main/docs/reusable-wasm-package-workflow.md)).

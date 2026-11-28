@@ -17,6 +17,9 @@ if [[ $# -ge 1 ]]; then
   bash tools/check_immutable.sh "$1"
 fi
 
+# Verify the official namespace claim at the website's canonical host.
+bash tools/check_namespace_ownership.sh
+
 # A registry may have no entry yet (git keeps no empty directory).
 mkdir -p packages
 downloads="$(mktemp -d)"
