@@ -20,29 +20,22 @@ root.pub, root.json, root.json.sig              root key, and the root-signed li
 keys/developers/<id>.json                       developer (publisher) keys
 namespaces/<namespace>.json                     namespace owners and the developer keys allowed in them
 packages/<identifier, dots as />/<version>.json registry entries
-replacements.json                              legacy identifiers and their replacements
 ```
 
 Publication adds `index.json` and a `.sig` next to every key, namespace file and entry; they are not committed.
 
-For example, the historical entry for `xila.pixel-painter` 0.2.1 is `packages/xila/pixel-painter/0.2.1.json`. The formats are defined in [`xila-project/package_manager`](https://github.com/xila-project/package_manager): [registry entry](https://github.com/xila-project/package_manager/blob/main/schemas/registry-entry.schema.json) (format 2, which records the minimum Xila version as `xila_version`), [developer key](https://github.com/xila-project/package_manager/blob/main/schemas/developer-key.schema.json) and [namespace file](https://github.com/xila-project/package_manager/blob/main/schemas/registry-namespace.schema.json); the identifier and namespace rules are in its [registry trust model](https://github.com/xila-project/package_manager/blob/main/docs/registry-trust.md#identifiers-and-namespaces).
+For example, `xila.pixel-painter` 0.2.1 is `packages/xila/pixel-painter/0.2.1.json`. The formats are defined in [`xila-project/package_manager`](https://github.com/xila-project/package_manager): [registry entry](https://github.com/xila-project/package_manager/blob/main/schemas/registry-entry.schema.json) (format 2, which records the minimum Xila version as `xila_version`), [developer key](https://github.com/xila-project/package_manager/blob/main/schemas/developer-key.schema.json) and [namespace file](https://github.com/xila-project/package_manager/blob/main/schemas/registry-namespace.schema.json); the identifier and namespace rules are in its [registry trust model](https://github.com/xila-project/package_manager/blob/main/docs/registry-trust.md#identifiers-and-namespaces).
 
-- A **package identifier** is reverse-DNS with at least three components, such as `example.xila.weather`. A **namespace file** `namespaces/<namespace>.json` names the owner of a namespace and the developer keys that may publish in it. The official namespace is `dev.xila`. The `xila` developer key retains its legacy grant to verify published versions of `xila.<name>`.
+- A **package identifier** is reverse-DNS with at least three components, such as `example.xila.weather`. A **namespace file** `namespaces/<namespace>.json` names the owner of a namespace and the developer keys that may publish in it. Xila's own packages still use the legacy two-component `xila.<name>` identifiers, which need no namespace file and are granted by `"namespaces": ["xila"]` in the developer key.
 - A **developer key** (`id`, `author`, Ed25519 `public_key`, optional legacy `namespaces`, `kinds`) signs package manifests and may only publish identifiers that a namespace file grants it (or, through the legacy rule, `xila.<name>`) and whose kind is in its `kinds`. A package is **Wasm** when its target starts with `wasm32-` or `wasm64-` and **native** otherwise. Native code on a microcontroller without a memory protection unit runs fully trusted, so `native` is a separate, explicit grant that a maintainer reviews; a key without `kinds` may publish Wasm only.
 - A **registry entry** pins one released archive by HTTPS URL, SHA-256 and size, names its `publisher`, and copies identity, compatibility, capabilities, display name and metadata from the archive's signed manifest. It is **generated from the archive, never written by hand**.
 
-## Official namespace
+## Official domain ownership
 
-The [namespace file](namespaces/dev.xila.json) records the domain owner
-`xila.dev` and the authorized publisher `xila`. Validation checks the public
-ownership token at
-[the website's canonical host](https://www.xila.dev/.well-known/xila-namespace.txt).
-The repository key signs the namespace file during normal publication.
-
-The [replacement list](replacements.json) maps the historical identifiers to
-their `dev.xila.*` replacements. Publication adds each pointer to the signed
-index when its new package has a registry entry. The original entries and
-archives remain available. See [the migration plan](https://github.com/xila-project/registry/issues/3#status).
+The website serves the public proof for `dev.xila` at
+`https://www.xila.dev/.well-known/xila-namespace.txt`. Registry validation
+checks the proof at the canonical website host. The per-package signing design
+will define how first publication uses the proof.
 
 ## Publishing a version
 
@@ -58,7 +51,7 @@ The workflow merges and publishes the pull request without a maintainer only whe
 - the validation passes;
 - the archive is a GitHub release asset (`https://github.com/<owner>/<repository>/releases/download/...`) of the repository that the signed package names in `metadata.source`. This stops a third party who copies a signed archive to its own server and submits it first.
 
-Every other submission waits for a maintainer review. A new publisher gets a key file with `kinds: ["wasm"]`; a maintainer grants `native` in a reviewed change. For an identifier in `io.github.<account>`, submitted from that GitHub account, the workflow also adds the namespace file `namespaces/io.github.<account>.json`. Any other new namespace needs a manual pull request.
+Every other submission waits for a maintainer review. A new publisher gets a key file with `kinds: ["wasm"]`; a maintainer grants `native` or the legacy `xila` namespace in a reviewed change. For an identifier in `io.github.<account>`, submitted from that GitHub account, the workflow also adds the namespace file `namespaces/io.github.<account>.json`. Any other new namespace needs a manual pull request.
 
 To submit by hand instead, generate the entry with [`xila-package`](https://github.com/xila-project/package_manager/tree/main/crates/builder) and open a pull request with it (and, the first time, `keys/developers/<id>.json`):
 
