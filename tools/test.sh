@@ -360,6 +360,15 @@ chmod +x "$work/bin/gh"
 cat > "$work/bin/git" <<'STUB'
 #!/usr/bin/env bash
 echo "git $*" >> "${GH_STUB_LOG:?GH_STUB_LOG is not set}"
+if [[ "${GH_STUB_MODE:-}" == stale-lease ]]; then
+  for argument in "$@"; do
+    if [[ "$argument" == --force-with-lease=* ]]; then
+      reference="${argument#--force-with-lease=}"
+      /usr/bin/git push --quiet --force origin "main:${reference%:*}" || exit
+      break
+    fi
+  done
+fi
 exec /usr/bin/git "$@"
 STUB
 chmod +x "$work/bin/git"
@@ -375,7 +384,7 @@ absent() { # <pattern> <file>: succeeds when the pattern is not in the file
 }
 
 # An automatic submission finds the open review pull request on its branch,
-# closes it with a comment, deletes the branch and continues to the merge.
+# deletes the branch, comments, closes the pull request and continues to the merge.
 # The branch first points at a diverging commit, so the delete must use the
 # lease on the commit that was read, and the push must replace the branch.
 outcome automatic submit "$release_url" test-developer
@@ -390,10 +399,25 @@ expect_success "the superseded pull request is closed" \
   grep -q "pr close https://example.test/pr/1" "$work/gh.log"
 expect_success "the branch is deleted with a lease on the commit that was read" \
   grep -q -- "--force-with-lease=refs/heads/submission/example.test.release/2.0.0:$diverging" "$work/gh.log"
+expect_success "the branch is deleted before the comment and the close follow" \
+  test "$(sed -nE 's/^git .* --force-with-lease=.*$/delete/p; s/^gh pr (comment|close) https:\/\/example\.test\/pr\/1 .*$/\1/p' "$work/gh.log")" \
+  = $'delete\ncomment\nclose'
 expect_success "the diverging branch head is replaced by the new submission" \
   test "$(git -C "$submission" ls-remote --heads origin refs/heads/submission/example.test.release/2.0.0 | cut -f1)" = "$(git -C "$submission" rev-parse HEAD)"
 expect_success "the automatic submission merges after the supersede" \
   grep -q '^state=merged' "$work/propose/output"
+git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
+git -C "$submission" reset -q --hard origin/main
+
+# Move the branch after the pull request head check but before the leased delete.
+outcome automatic submit "$release_url" test-developer
+git -C "$submission" push -q origin "$diverging:refs/heads/submission/example.test.release/2.0.0"
+git -C "$submission" reset -q --hard origin/main && git -C "$submission" clean -q -fd
+GH_STUB_MODE=stale-lease expect_failure "a changed branch fails the deletion lease" "stale info" propose_full
+expect_success "the changed branch still points at the replacement commit" \
+  test "$(git -C "$submission" ls-remote --heads origin refs/heads/submission/example.test.release/2.0.0 | cut -f1)" = "$(git -C "$submission" rev-parse main)"
+expect_success "a failed lease leaves the pull request open" absent "pr close" "$work/gh.log"
+expect_success "a failed lease leaves the pull request uncommented" absent "pr comment" "$work/gh.log"
 git -C "$submission" push -q origin --delete refs/heads/submission/example.test.release/2.0.0
 git -C "$submission" reset -q --hard origin/main
 
